@@ -292,11 +292,13 @@ function renderRunTable(tbodySelector, results) {
       const panel = document.createElement("div");
       panel.className = "retest-panel";
       panel.innerHTML = `
-        <div class="retest-hint">可以填写重测原因，AI 会分析重测结果并在对话面板回复（也可以直接跳过）</div>
-        <textarea class="retest-reason" placeholder="重测原因（可选）：例如：这个失败可能是数据前置问题，不是真实 Bug" rows="2"></textarea>
+        <div class="retest-hint">填写业务说明后可以让 AI 先更新用例数据再重测，或直接用原数据重测。</div>
+        <textarea class="retest-reason" placeholder="业务说明（可选）：例如：业务规则改了，总返佣限制改为 70/80/90，请更新用例数据" rows="2"></textarea>
         <div class="row">
-          <button type="button" class="primary subtle-btn retest-confirm">确认重测</button>
+          <button type="button" class="primary subtle-btn retest-update-run">AI 更新用例后重测</button>
+          <button type="button" class="secondary subtle-btn retest-confirm">直接重测（原数据）</button>
         </div>
+        <div class="retest-status-line muted" style="display:none"></div>
         <div class="retest-result-block" style="display:none">
           <div class="retest-result-head"></div>
           <details class="retest-response-detail">
@@ -308,6 +310,157 @@ function renderRunTable(tbodySelector, results) {
       `;
       row.appendChild(panel);
 
+      // ── AI 更新用例后重测 ──────────────────────────────
+      panel.querySelector(".retest-update-run").onclick = async () => {
+        const updateBtn = panel.querySelector(".retest-update-run");
+        const reason = panel.querySelector(".retest-reason").value.trim();
+        const statusLine = panel.querySelector(".retest-status-line");
+        const resultBlock = panel.querySelector(".retest-result-block");
+        const resultHead = panel.querySelector(".retest-result-head");
+        const responseBody = panel.querySelector(".retest-response-body");
+        const aiReplyDiv = panel.querySelector(".retest-ai-reply");
+
+        const caseName =
+          button.dataset.retestCaseName || button.dataset.retestCase;
+        const interfaceName = button.dataset.retestInterfaceName || "";
+
+        updateBtn.disabled = true;
+        panel.querySelector(".retest-confirm").disabled = true;
+        statusLine.style.display = "";
+        statusLine.textContent = "AI 更新用例中...";
+        resultBlock.style.display = "none";
+
+        try {
+          // Step 1: 让 AI 修改用例数据
+          const updateMsg = `根据以下业务变更说明，更新接口"${interfaceName}"中用例"${caseName}"的请求体和期望结果。业务说明：${reason || "（无说明）"}`;
+          const updateResult = await apiFetch("/api/ai/chat", {
+            method: "POST",
+            body: JSON.stringify({
+              message: updateMsg,
+              autoApply: true,
+              history: [],
+            }),
+          });
+
+          if (!updateResult.updated) {
+            statusLine.textContent = `AI 未能更新用例：${updateResult.reply || "无回复"}，请手动在"接口与用例"Tab 修改后再重测。`;
+            updateBtn.disabled = false;
+            panel.querySelector(".retest-confirm").disabled = false;
+            return;
+          }
+
+          statusLine.textContent = `用例已更新（${updateResult.reply?.slice(0, 60) || ""}），正在重测...`;
+
+          // Step 2: 重新加载接口数据后运行
+          await loadInterfacesOnly();
+
+          const retestResult = await apiFetch(
+            `/api/interfaces/${button.dataset.retestInterface}/cases/${button.dataset.retestCase}/run`,
+            { method: "POST", body: JSON.stringify({}) },
+          );
+
+          const pass = retestResult.pass;
+          resultHead.className = `retest-result-head ${pass ? "status-pass" : "status-fail"}`;
+          resultHead.textContent = `${pass ? "✓ 通过" : "✗ 失败"} — ${retestResult.assertionSummary || ""}`;
+          const respJson = retestResult.response?.bodyJson;
+          const respText = retestResult.response?.bodyText;
+          const respErr = retestResult.response?.transportError;
+          responseBody.textContent = respErr
+            ? `网络错误: ${respErr}`
+            : respJson != null
+              ? JSON.stringify(respJson, null, 2)
+              : respText || "-";
+          resultBlock.style.display = "";
+          statusLine.textContent = pass
+            ? "用例已更新并通过重测，可以 dismissed 对应 bug。"
+            : "用例已更新但重测仍失败，请检查用例数据是否正确。";
+
+          // 在结果行追加重测标记
+          const tr = button.closest("tr");
+          if (tr) {
+            const statusTd = tr.querySelectorAll("td")[3];
+            if (statusTd) {
+              const old = statusTd.querySelector(".retest-badge");
+              if (old) old.remove();
+              const badge = document.createElement("div");
+              badge.className = `retest-badge ${pass ? "status-pass" : "status-fail"}`;
+              badge.textContent = `AI更新重测: ${pass ? "通过" : "失败"}`;
+              statusTd.appendChild(badge);
+            }
+          }
+
+          // 发给 AI run-chat 更新 bug 状态
+          const activeRunId = state.dashboardRunId || state.selectedRunId;
+          if (activeRunId) {
+            if (!state.runChatMessages[activeRunId])
+              state.runChatMessages[activeRunId] = [];
+            const matchingBug = state.bugs.find(
+              (b) =>
+                b.caseName === caseName &&
+                (b.status === "open" || b.status === "confirmed"),
+            );
+            const bugIdLine = matchingBug
+              ? `对应 bugId：${matchingBug.id}（${matchingBug.title}）`
+              : "";
+            const chatContent = [
+              `[AI更新用例后重测] 接口：${interfaceName}，用例：${caseName}`,
+              bugIdLine,
+              `业务说明：${reason || "无"}`,
+              `重测结果：${pass ? "通过" : "失败"} — ${retestResult.assertionSummary || ""}`,
+            ]
+              .filter(Boolean)
+              .join("\n");
+
+            state.runChatMessages[activeRunId].push({
+              role: "user",
+              content: chatContent,
+              time: new Date().toISOString(),
+            });
+            renderRunChatLog("dashboard-run-chat-log", activeRunId);
+            renderRunChatLog("selected-run-chat-log", activeRunId);
+
+            aiReplyDiv.style.display = "";
+            aiReplyDiv.textContent = "AI 分析中...";
+            try {
+              const history = state.runChatMessages[activeRunId]
+                .slice(-10)
+                .map((m) => ({ role: m.role, content: m.content }));
+              const chatResult = await apiFetch("/api/ai/run-chat", {
+                method: "POST",
+                body: JSON.stringify({
+                  runId: activeRunId,
+                  message: chatContent,
+                  history,
+                }),
+              });
+              const reply = chatResult.reply || "已处理";
+              state.runChatMessages[activeRunId].push({
+                role: "assistant",
+                content: reply,
+                time: new Date().toISOString(),
+              });
+              renderRunChatLog("dashboard-run-chat-log", activeRunId);
+              renderRunChatLog("selected-run-chat-log", activeRunId);
+              aiReplyDiv.textContent = `AI：${reply}`;
+              aiReplyDiv.className = "retest-ai-reply";
+              if (chatResult.appliedCount > 0) {
+                await loadBugsOnly();
+                renderBugList();
+              }
+            } catch {
+              aiReplyDiv.textContent = "AI 分析失败";
+              aiReplyDiv.className = "retest-ai-reply muted";
+            }
+          }
+        } catch (error) {
+          statusLine.textContent = `操作失败: ${error.message}`;
+        } finally {
+          updateBtn.disabled = false;
+          panel.querySelector(".retest-confirm").disabled = false;
+        }
+      };
+
+      // ── 直接重测（原数据）──────────────────────────────
       panel.querySelector(".retest-confirm").onclick = async () => {
         const confirmBtn = panel.querySelector(".retest-confirm");
         const reason = panel.querySelector(".retest-reason").value.trim();

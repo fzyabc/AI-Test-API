@@ -15,6 +15,7 @@ const state = {
   bugFilterStatus: "all",
   runChatMessages: {}, // { [runId]: [{role, content, time}] }
   dashboardRunId: "",
+  retestUpdates: {}, // { "interfaceId:caseId": { pass, assertionSummary, label } }
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -276,6 +277,28 @@ function renderRunTable(tbodySelector, results) {
       <td class="result-detail-cell">${buildResultDetailsHtml(item)}</td>
     `;
     tbody.appendChild(tr);
+
+    // 重测结果持久化：如果此用例有重测记录，重新应用到行上
+    const retestKey = `${item.interfaceId}:${item.caseId}`;
+    const retestUpdate = state.retestUpdates[retestKey];
+    if (retestUpdate) {
+      const tds = tr.querySelectorAll("td");
+      const statusTd = tds[3];
+      if (statusTd) {
+        statusTd.className = retestUpdate.pass ? "status-pass" : "status-fail";
+        statusTd.childNodes.forEach((n) => {
+          if (n.nodeType === Node.TEXT_NODE)
+            n.textContent = retestUpdate.pass ? "通过" : "失败";
+        });
+        const badge = document.createElement("div");
+        badge.className = `retest-badge ${retestUpdate.pass ? "status-pass" : "status-fail"}`;
+        badge.textContent = `${retestUpdate.label}: ${retestUpdate.pass ? "通过" : "失败"}`;
+        statusTd.appendChild(badge);
+      }
+      const summaryEl = tds[4]?.querySelector(".result-summary-text");
+      if (summaryEl)
+        summaryEl.textContent = `[${retestUpdate.label}] ${retestUpdate.assertionSummary || ""}`;
+    }
   }
 
   tbody.querySelectorAll("[data-retest-interface]").forEach((button) => {
@@ -388,12 +411,25 @@ function renderRunTable(tbodySelector, results) {
             ? "用例已更新并通过重测，可以 dismissed 对应 bug。"
             : "用例已更新但重测仍失败，请检查用例数据是否正确。";
 
+          // 保存重测结果到 state，防止页面重渲后丢失
+          const retestKey = `${button.dataset.retestInterface}:${button.dataset.retestCase}`;
+          state.retestUpdates[retestKey] = {
+            pass,
+            assertionSummary: retestResult.assertionSummary || "",
+            label: "AI更新重测",
+          };
+
           // 在结果行更新状态
           const tr = button.closest("tr");
           if (tr) {
             const tds = tr.querySelectorAll("td");
             const statusTd = tds[3];
             if (statusTd) {
+              statusTd.className = pass ? "status-pass" : "status-fail";
+              statusTd.childNodes.forEach((n) => {
+                if (n.nodeType === Node.TEXT_NODE)
+                  n.textContent = pass ? "通过" : "失败";
+              });
               const old = statusTd.querySelector(".retest-badge");
               if (old) old.remove();
               const badge = document.createElement("div");
@@ -401,23 +437,11 @@ function renderRunTable(tbodySelector, results) {
               badge.textContent = `AI更新重测: ${pass ? "通过" : "失败"}`;
               statusTd.appendChild(badge);
             }
-            // 如果通过，把原始失败结果行也改为通过样式
-            if (pass && statusTd) {
-              statusTd.className = "status-pass";
-              const orig = statusTd.querySelector(".retest-badge");
-              // 原始文字节点更新
-              statusTd.childNodes.forEach((node) => {
-                if (node.nodeType === Node.TEXT_NODE) node.textContent = "通过";
-              });
-              // 更新摘要列
-              const detailTd = tds[4];
-              if (detailTd) {
-                const summaryEl = detailTd.querySelector(
-                  ".result-summary-text",
-                );
-                if (summaryEl)
-                  summaryEl.textContent = `[AI重测] ${retestResult.assertionSummary || "全部断言通过"}`;
-              }
+            const detailTd = tds[4];
+            if (detailTd) {
+              const summaryEl = detailTd.querySelector(".result-summary-text");
+              if (summaryEl)
+                summaryEl.textContent = `[AI更新重测] ${retestResult.assertionSummary || "全部断言通过"}`;
             }
           }
 
@@ -543,10 +567,19 @@ function renderRunTable(tbodySelector, results) {
           return;
         }
 
+        // 保存重测结果到 state，防止页面重渲后丢失
+        const retestKey2 = `${button.dataset.retestInterface}:${button.dataset.retestCase}`;
+        state.retestUpdates[retestKey2] = {
+          pass: retestResult.pass,
+          assertionSummary: retestResult.assertionSummary || "",
+          label: "重测",
+        };
+
         // 重测完成后在结果行的状态列追加标记
         const tr = button.closest("tr");
         if (tr) {
-          const statusTd = tr.querySelectorAll("td")[3];
+          const tds = tr.querySelectorAll("td");
+          const statusTd = tds[3];
           if (statusTd) {
             const old = statusTd.querySelector(".retest-badge");
             if (old) old.remove();
@@ -1774,6 +1807,7 @@ async function runAllCases() {
 
     state.runs.unshift(run);
     state.selectedRunId = run.id;
+    state.retestUpdates = {}; // 新执行时清空重测记录
     renderLatestRun();
     renderRunList();
 
@@ -1820,7 +1854,9 @@ async function analyzeLatest() {
     ]
       .filter(Boolean)
       .join("\n\n");
-    await loadAll();
+    // 只刷新 run 列表，不重渲结果表格（避免丢失重测标记）
+    await loadRunsOnly();
+    renderRunList();
     showToast("AI 分析完成");
   } catch (error) {
     showToast(`AI 分析失败: ${error.message}`, "error");
@@ -1842,8 +1878,9 @@ async function analyzeSelectedRun() {
     ]
       .filter(Boolean)
       .join("\n\n");
-    await loadAll();
-    await loadRunDetail(state.selectedRunId);
+    // 只刷新 run 列表，不重渲结果表格（避免丢失重测标记）
+    await loadRunsOnly();
+    renderRunList();
     showToast("AI 分析完成");
   } catch (error) {
     showToast(`AI 分析失败: ${error.message}`, "error");

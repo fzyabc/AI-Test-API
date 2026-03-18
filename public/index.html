@@ -18,6 +18,7 @@
         <button type="button" class="nav-btn" data-tab="settings">系统设置</button>
         <button type="button" class="nav-btn" data-tab="ai-chat">AI 对话</button>
         <button type="button" class="nav-btn" data-tab="runs">历史结果</button>
+        <button type="button" class="nav-btn" data-tab="bugs">Bug 列表</button>
       </nav>
     </aside>
 
@@ -68,6 +69,18 @@
             <button id="analyze-latest-btn" type="button" class="secondary">分析最新结果</button>
           </div>
           <pre id="ai-report"></pre>
+        </div>
+
+        <div id="dashboard-run-chat" class="card run-chat-panel" style="display:none">
+          <h3>与 AI 对话 · 分析此次结果</h3>
+          <div class="muted">可以告诉 AI 哪个 bug 不成立、是文档写法问题，AI 会自动更新 bug 状态。</div>
+          <div id="dashboard-run-chat-log" class="ai-chat-log"></div>
+          <label>对 AI 说
+            <textarea id="dashboard-run-chat-input" placeholder="例如：第二个 bug 是文档描述不清楚，不是真实缺陷；或：帮我看下第一个用例为什么失败"></textarea>
+          </label>
+          <div class="row">
+            <button id="dashboard-run-chat-send" type="button" class="primary">发送</button>
+          </div>
         </div>
       </section>
 
@@ -254,8 +267,40 @@
               </div>
               <pre id="selected-run-ai-report"></pre>
             </div>
+
+            <div id="selected-run-chat" class="card run-chat-panel" style="display:none">
+              <h3>与 AI 对话 · 分析此次结果</h3>
+              <div class="muted">可以告诉 AI 哪个 bug 不成立、是文档写法问题，AI 会自动更新 bug 状态。</div>
+              <div id="selected-run-chat-log" class="ai-chat-log"></div>
+              <label>对 AI 说
+                <textarea id="selected-run-chat-input" placeholder="例如：第二个 bug 是文档描述不清楚，不是真实缺陷；或：帮我看下第一个用例为什么失败"></textarea>
+              </label>
+              <div class="row">
+                <button id="selected-run-chat-send" type="button" class="primary">发送</button>
+              </div>
+            </div>
           </div>
         </div>
+      </section>
+
+      <section id="bugs" class="tab-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Bug 列表</h2>
+            <div class="muted">AI 执行后自动记录发现的 bug，可修改状态追踪修复进度</div>
+          </div>
+          <div class="row">
+            <select id="bug-filter-status">
+              <option value="all">全部状态</option>
+              <option value="open">open</option>
+              <option value="confirmed">confirmed</option>
+              <option value="fixed">fixed</option>
+              <option value="dismissed">dismissed</option>
+            </select>
+            <button id="clear-fixed-bugs-btn" type="button" class="secondary">清除 fixed/dismissed</button>
+          </div>
+        </div>
+        <div id="bug-list-container"></div>
       </section>
     </main>
   </div>

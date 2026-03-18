@@ -2,60 +2,64 @@ const state = {
   settings: null,
   interfaces: [],
   runs: [],
-  selectedInterfaceId: '',
-  selectedCaseId: '',
-  selectedRunId: '',
-  runAuthProfileId: '__case__',
+  bugs: [],
+  selectedInterfaceId: "",
+  selectedCaseId: "",
+  selectedRunId: "",
+  runAuthProfileId: "__case__",
   settingsDirty: false,
-  oosLoginSessionId: '',
+  oosLoginSessionId: "",
   oosLoginTimer: null,
   oosLoginPollingBusy: false,
   aiChatMessages: [],
+  bugFilterStatus: "all",
+  runChatMessages: {}, // { [runId]: [{role, content, time}] }
+  dashboardRunId: "",
 };
 
 const $ = (selector) => document.querySelector(selector);
-const beijingFormatter = new Intl.DateTimeFormat('sv-SE', {
-  timeZone: 'Asia/Shanghai',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
+const beijingFormatter = new Intl.DateTimeFormat("sv-SE", {
+  timeZone: "Asia/Shanghai",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
   hour12: false,
 });
 
-function showToast(message, type = 'success') {
-  const toast = $('#toast');
+function showToast(message, type = "success") {
+  const toast = $("#toast");
   if (!toast) return;
   toast.textContent = message;
   toast.className = `toast ${type}`;
   window.setTimeout(() => {
-    toast.className = 'toast hidden';
+    toast.className = "toast hidden";
   }, 2800);
 }
 
 function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function formatBeijingTime(value) {
-  if (!value) return '-';
+  if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return `${beijingFormatter.format(date).replace(',', '')} UTC+8`;
+  return `${beijingFormatter.format(date).replace(",", "")} UTC+8`;
 }
 
 function formatDisplayValue(value) {
-  if (value == null || value === '') return '-';
-  if (typeof value === 'string') {
+  if (value == null || value === "") return "-";
+  if (typeof value === "string") {
     const text = value.trim();
-    if (!text) return '-';
+    if (!text) return "-";
     try {
       return JSON.stringify(JSON.parse(text), null, 2);
     } catch {
@@ -75,11 +79,11 @@ function safeJsonParse(text, fallback) {
 
 async function apiFetch(url, options = {}) {
   const headers = {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
     ...(options.headers || {}),
   };
   const response = await fetch(url, {
-    cache: 'no-store',
+    cache: "no-store",
     ...options,
     headers,
   });
@@ -100,11 +104,11 @@ async function apiFetch(url, options = {}) {
 }
 
 function showTab(tabId) {
-  document.querySelectorAll('.nav-btn').forEach((button) => {
-    button.classList.toggle('active', button.dataset.tab === tabId);
+  document.querySelectorAll(".nav-btn").forEach((button) => {
+    button.classList.toggle("active", button.dataset.tab === tabId);
   });
-  document.querySelectorAll('.tab-panel').forEach((panel) => {
-    panel.classList.toggle('active', panel.id === tabId);
+  document.querySelectorAll(".tab-panel").forEach((panel) => {
+    panel.classList.toggle("active", panel.id === tabId);
   });
 }
 
@@ -113,9 +117,9 @@ function markSettingsDirty() {
 }
 
 function setOosBrowserStatus(message) {
-  const node = $('#ai-oos-browser-status');
+  const node = $("#ai-oos-browser-status");
   if (!node) return;
-  node.textContent = String(message || '');
+  node.textContent = String(message || "");
 }
 
 function stopOosLoginPolling() {
@@ -131,20 +135,25 @@ function getAuthProfiles() {
 }
 
 function getAuthProfileName(authProfileId) {
-  if (!authProfileId) return '无账号';
-  return getAuthProfiles().find((item) => item.id === authProfileId)?.name || authProfileId;
+  if (!authProfileId) return "无账号";
+  return (
+    getAuthProfiles().find((item) => item.id === authProfileId)?.name ||
+    authProfileId
+  );
 }
 
 function getExecutionProfileLabel(run) {
-  return run?.executionProfile?.label || '按用例账号';
+  return run?.executionProfile?.label || "按用例账号";
 }
 
 function parseMessageIncludes(expectedValue) {
   if (Array.isArray(expectedValue)) {
-    return expectedValue.map((item) => String(item || '').trim()).filter(Boolean);
+    return expectedValue
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
   }
-  return String(expectedValue || '')
-    .split('||')
+  return String(expectedValue || "")
+    .split("||")
     .map((item) => item.trim())
     .filter(Boolean);
 }
@@ -160,8 +169,11 @@ function buildAiMetaLines(aiMeta) {
   if (Array.isArray(aiMeta.attempts) && aiMeta.attempts.length) {
     lines.push(
       `AI 尝试链路: ${aiMeta.attempts
-        .map((item) => `${item.wireApi}${item.variant ? `/${item.variant}` : ''} ${item.status} ${item.endpoint}`)
-        .join(' | ')}`,
+        .map(
+          (item) =>
+            `${item.wireApi}${item.variant ? `/${item.variant}` : ""} ${item.status} ${item.endpoint}`,
+        )
+        .join(" | ")}`,
     );
   }
   if (aiMeta.planMeta?.endpoint) {
@@ -177,16 +189,18 @@ function buildAiMetaLines(aiMeta) {
 }
 
 function getResultAuthLabel(result) {
-  if (result.authSource === 'override_public') return '无账号';
-  if (result.authSource === 'override' && result.authProfileName) return `${result.authProfileName} (覆盖)`;
+  if (result.authSource === "override_public") return "无账号";
+  if (result.authSource === "override" && result.authProfileName)
+    return `${result.authProfileName} (覆盖)`;
   if (result.authProfileName) return result.authProfileName;
   if (result.authProfileId) return getAuthProfileName(result.authProfileId);
-  return '无账号';
+  return "无账号";
 }
 
 function buildResponseText(response = {}) {
   const lines = [];
-  if (response.transportError) lines.push(`网络错误: ${response.transportError}`);
+  if (response.transportError)
+    lines.push(`网络错误: ${response.transportError}`);
   if (response.bodyJson != null) {
     lines.push(JSON.stringify(response.bodyJson, null, 2));
   } else if (response.bodyText) {
@@ -194,31 +208,38 @@ function buildResponseText(response = {}) {
   } else if (response.httpStatus != null) {
     lines.push(`HTTP ${response.httpStatus}`);
   }
-  return lines.filter(Boolean).join('\n\n') || '-';
+  return lines.filter(Boolean).join("\n\n") || "-";
 }
 
 function buildRetryText(retry = {}) {
-  if (!retry.attempted || !Array.isArray(retry.attempts) || retry.attempts.length < 2) return '-';
+  if (
+    !retry.attempted ||
+    !Array.isArray(retry.attempts) ||
+    retry.attempts.length < 2
+  )
+    return "-";
   return retry.attempts
     .map((item, index) => {
       const parts = [
         `第 ${index + 1} 次`,
-        `原因: ${item.reason || '-'}`,
+        `原因: ${item.reason || "-"}`,
         `请求体:\n${formatDisplayValue(item.request?.body)}`,
         `响应:\n${buildResponseText(item.response)}`,
       ];
-      return parts.join('\n\n');
+      return parts.join("\n\n");
     })
-    .join('\n\n----------------\n\n');
+    .join("\n\n----------------\n\n");
 }
 
 function buildResultDetailsHtml(item) {
-  const requestLine = [item.method, item.url || item.path].filter(Boolean).join(' ');
+  const requestLine = [item.method, item.url || item.path]
+    .filter(Boolean)
+    .join(" ");
   return `
-    <div class="result-summary-text">${escapeHtml(item.assertionSummary || '')}</div>
+    <div class="result-summary-text">${escapeHtml(item.assertionSummary || "")}</div>
     <details class="result-details">
       <summary>查看请求与响应详情</summary>
-      <div class="result-detail-meta">${escapeHtml(requestLine || '-')}</div>
+      <div class="result-detail-meta">${escapeHtml(requestLine || "-")}</div>
       <div class="result-detail-block">
         <div class="detail-label">请求 Headers</div>
         <pre>${escapeHtml(formatDisplayValue(item.request?.headers))}</pre>
@@ -236,32 +257,50 @@ function buildResultDetailsHtml(item) {
         <pre>${escapeHtml(buildRetryText(item.retry))}</pre>
       </div>
     </details>
+    ${item.interfaceId && item.caseId ? `<div class="result-retest-row"><button type="button" class="secondary subtle-btn" data-retest-interface="${escapeHtml(item.interfaceId)}" data-retest-case="${escapeHtml(item.caseId)}">重测此用例</button></div>` : ""}
   `;
 }
 
 function renderRunTable(tbodySelector, results) {
   const tbody = $(tbodySelector);
   if (!tbody) return;
-  tbody.innerHTML = '';
+  tbody.innerHTML = "";
 
   for (const item of results || []) {
-    const tr = document.createElement('tr');
+    const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${escapeHtml(item.interfaceName || '')}</td>
-      <td>${escapeHtml(item.caseName || '')}</td>
+      <td>${escapeHtml(item.interfaceName || "")}</td>
+      <td>${escapeHtml(item.caseName || "")}</td>
       <td>${escapeHtml(getResultAuthLabel(item))}</td>
-      <td class="${item.pass ? 'status-pass' : 'status-fail'}">${item.pass ? '通过' : '失败'}</td>
+      <td class="${item.pass ? "status-pass" : "status-fail"}">${item.pass ? "通过" : "失败"}</td>
       <td class="result-detail-cell">${buildResultDetailsHtml(item)}</td>
     `;
     tbody.appendChild(tr);
   }
+
+  tbody.querySelectorAll("[data-retest-interface]").forEach((button) => {
+    button.onclick = async () => {
+      button.disabled = true;
+      const oldText = button.textContent;
+      button.textContent = "重测中...";
+      try {
+        await retestCase(
+          button.dataset.retestInterface,
+          button.dataset.retestCase,
+        );
+      } finally {
+        button.disabled = false;
+        button.textContent = oldText;
+      }
+    };
+  });
 }
 
 function renderSummary(run) {
-  const container = $('#dashboard-summary');
+  const container = $("#dashboard-summary");
   if (!container) return;
   if (!run) {
-    container.innerHTML = '';
+    container.innerHTML = "";
     return;
   }
 
@@ -276,45 +315,46 @@ function renderSummary(run) {
 function renderLatestRun() {
   const run = state.runs[0];
   renderSummary(run);
-  const meta = $('#latest-run-meta');
+  const meta = $("#latest-run-meta");
   if (!meta) return;
 
   if (!run) {
-    meta.textContent = '暂无执行记录';
-    renderRunTable('#latest-run-results', []);
+    meta.textContent = "暂无执行记录";
+    renderRunTable("#latest-run-results", []);
     return;
   }
 
   meta.textContent = `记录 ${run.id} | 开始 ${formatBeijingTime(run.startedAt)} | ${getExecutionProfileLabel(run)} | 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`;
-  renderRunTable('#latest-run-results', run.results || []);
+  renderRunTable("#latest-run-results", run.results || []);
 }
 
 function ensureAiChatInitMessage() {
   if (state.aiChatMessages.length) return;
   state.aiChatMessages.push({
-    role: 'assistant',
-    content: '我是用例编辑 AI。你可以直接说“新增/修改/删除哪个接口或用例”，我会直接修改平台数据。',
+    role: "assistant",
+    content:
+      "我是用例编辑 AI。你可以直接说“新增/修改/删除哪个接口或用例”，我会直接修改平台数据。",
     time: new Date().toISOString(),
   });
 }
 
 function renderAiChatLog() {
-  const container = $('#ai-chat-log');
+  const container = $("#ai-chat-log");
   if (!container) return;
   ensureAiChatInitMessage();
 
-  container.innerHTML = '';
+  container.innerHTML = "";
   for (const item of state.aiChatMessages) {
-    const node = document.createElement('div');
-    const role = item.role === 'user' ? 'user' : 'assistant';
+    const node = document.createElement("div");
+    const role = item.role === "user" ? "user" : "assistant";
     node.className = `ai-chat-item ${role}`;
-    const meta = `${role === 'user' ? '你' : 'AI'} | ${formatBeijingTime(item.time)}`;
+    const meta = `${role === "user" ? "你" : "AI"} | ${formatBeijingTime(item.time)}`;
     const extra = item.meta?.endpoint
       ? `\n\n[AI Endpoint] ${item.meta.endpoint}`
-      : '';
+      : "";
     node.innerHTML = `
       <div class="ai-chat-meta">${escapeHtml(meta)}</div>
-      <div class="ai-chat-text">${escapeHtml(`${item.content || ''}${extra}`).replace(/\n/g, '<br/>')}</div>
+      <div class="ai-chat-text">${escapeHtml(`${item.content || ""}${extra}`).replace(/\n/g, "<br/>")}</div>
     `;
     container.appendChild(node);
   }
@@ -322,28 +362,28 @@ function renderAiChatLog() {
 }
 
 async function sendAiChatMessage() {
-  const input = $('#ai-chat-input');
-  const button = $('#ai-chat-send-btn');
+  const input = $("#ai-chat-input");
+  const button = $("#ai-chat-send-btn");
   if (!input || !button) return;
   const message = input.value.trim();
   if (!message) return;
 
   state.aiChatMessages.push({
-    role: 'user',
+    role: "user",
     content: message,
     time: new Date().toISOString(),
   });
   renderAiChatLog();
-  input.value = '';
+  input.value = "";
 
   button.disabled = true;
   const oldText = button.textContent;
-  button.textContent = '处理中...';
+  button.textContent = "处理中...";
   try {
     await persistSettingsIfDirty();
-    const autoApply = $('#ai-chat-auto-apply')?.checked !== false;
-    const result = await apiFetch('/api/ai/chat', {
-      method: 'POST',
+    const autoApply = $("#ai-chat-auto-apply")?.checked !== false;
+    const result = await apiFetch("/api/ai/chat", {
+      method: "POST",
       body: JSON.stringify({
         message,
         autoApply,
@@ -356,10 +396,10 @@ async function sendAiChatMessage() {
 
     const actionLine = result.actions?.length
       ? `\n\n生成操作: ${result.actions.length}，已应用: ${result.appliedCount || 0}`
-      : '';
+      : "";
     state.aiChatMessages.push({
-      role: 'assistant',
-      content: `${result.reply || '已处理。'}${actionLine}`,
+      role: "assistant",
+      content: `${result.reply || "已处理。"}${actionLine}`,
       time: new Date().toISOString(),
       meta: result.aiMeta || null,
     });
@@ -371,21 +411,21 @@ async function sendAiChatMessage() {
       populateInterfaceForm();
       renderCaseList();
       populateCaseForm();
-      showToast('AI 已应用修改到接口/用例');
+      showToast("AI 已应用修改到接口/用例");
     } else {
-      showToast('AI 已回复');
+      showToast("AI 已回复");
     }
   } catch (error) {
     state.aiChatMessages.push({
-      role: 'assistant',
+      role: "assistant",
       content: `处理失败：${error.message}`,
       time: new Date().toISOString(),
     });
     renderAiChatLog();
-    showToast(`AI 对话失败: ${error.message}`, 'error');
+    showToast(`AI 对话失败: ${error.message}`, "error");
   } finally {
     button.disabled = false;
-    button.textContent = oldText || '发送并执行';
+    button.textContent = oldText || "发送并执行";
   }
 }
 
@@ -394,19 +434,238 @@ function clearAiChatMessages() {
   renderAiChatLog();
 }
 
+async function loadBugsOnly() {
+  const payload = await apiFetch("/api/bugs");
+  state.bugs = payload.bugs || [];
+}
+
+function renderBugList() {
+  const container = $("#bug-list-container");
+  if (!container) return;
+
+  const filtered =
+    state.bugFilterStatus === "all"
+      ? state.bugs
+      : state.bugs.filter((b) => b.status === state.bugFilterStatus);
+
+  if (!filtered.length) {
+    container.innerHTML = '<div class="list-item muted">暂无 Bug 记录</div>';
+    return;
+  }
+
+  container.innerHTML = "";
+  for (const bug of filtered) {
+    const card = document.createElement("div");
+    card.className = "card bug-card";
+    card.innerHTML = `
+      <div class="bug-card-head">
+        <span class="severity-badge severity-${escapeHtml(bug.severity || "medium")}">${escapeHtml(bug.severity || "medium")}</span>
+        <strong class="bug-title">${escapeHtml(bug.title || "")}</strong>
+        <select class="bug-status-select" data-bug-id="${escapeHtml(bug.id)}">
+          ${["open", "confirmed", "fixed", "dismissed"]
+            .map(
+              (s) =>
+                `<option value="${s}" ${bug.status === s ? "selected" : ""}>${s}</option>`,
+            )
+            .join("")}
+        </select>
+        <button type="button" class="danger subtle-btn" data-delete-bug="${escapeHtml(bug.id)}">删除</button>
+      </div>
+      <div class="muted bug-meta">${escapeHtml(bug.interfaceName || "")}${bug.caseName ? ` | ${escapeHtml(bug.caseName)}` : ""}</div>
+      <div class="bug-description">${escapeHtml(bug.description || "")}</div>
+      <details class="bug-evidence">
+        <summary>查看请求与响应</summary>
+        <div class="result-detail-block">
+          <div class="detail-label">请求</div>
+          <pre>${escapeHtml(formatDisplayValue(bug.request))}</pre>
+        </div>
+        <div class="result-detail-block">
+          <div class="detail-label">响应</div>
+          <pre>${escapeHtml(formatDisplayValue(bug.response))}</pre>
+        </div>
+      </details>
+      <div class="tiny-muted">${formatBeijingTime(bug.createdAt)}</div>
+    `;
+    container.appendChild(card);
+  }
+
+  container.querySelectorAll(".bug-status-select").forEach((select) => {
+    select.onchange = async () => {
+      try {
+        await apiFetch(`/api/bugs/${select.dataset.bugId}`, {
+          method: "PUT",
+          body: JSON.stringify({ status: select.value }),
+        });
+        const bug = state.bugs.find((b) => b.id === select.dataset.bugId);
+        if (bug) bug.status = select.value;
+        showToast("Bug 状态已更新");
+        renderBugList();
+      } catch (error) {
+        showToast(`更新失败: ${error.message}`, "error");
+      }
+    };
+  });
+
+  container.querySelectorAll("[data-delete-bug]").forEach((button) => {
+    button.onclick = async () => {
+      if (!window.confirm("确认删除此 Bug 吗？")) return;
+      try {
+        await apiFetch(`/api/bugs/${button.dataset.deleteBug}`, {
+          method: "DELETE",
+        });
+        state.bugs = state.bugs.filter(
+          (b) => b.id !== button.dataset.deleteBug,
+        );
+        renderBugList();
+        showToast("Bug 已删除");
+      } catch (error) {
+        showToast(`删除失败: ${error.message}`, "error");
+      }
+    };
+  });
+}
+
+async function clearFixedBugs() {
+  const toDelete = state.bugs.filter(
+    (b) => b.status === "fixed" || b.status === "dismissed",
+  );
+  if (!toDelete.length) {
+    showToast("没有可清除的 Bug", "error");
+    return;
+  }
+  if (
+    !window.confirm(`确认清除 ${toDelete.length} 条 fixed/dismissed Bug 吗？`)
+  )
+    return;
+  try {
+    await Promise.all(
+      toDelete.map((b) => apiFetch(`/api/bugs/${b.id}`, { method: "DELETE" })),
+    );
+    state.bugs = state.bugs.filter(
+      (b) => b.status !== "fixed" && b.status !== "dismissed",
+    );
+    renderBugList();
+    showToast(`已清除 ${toDelete.length} 条 Bug`);
+  } catch (error) {
+    showToast(`清除失败: ${error.message}`, "error");
+  }
+}
+
+function renderRunChatLog(logId, runId) {
+  const container = document.getElementById(logId);
+  if (!container) return;
+  const messages = state.runChatMessages[runId] || [];
+  container.innerHTML = "";
+  for (const item of messages) {
+    const node = document.createElement("div");
+    const role = item.role === "user" ? "user" : "assistant";
+    node.className = `ai-chat-item ${role}`;
+    const meta = `${role === "user" ? "你" : "AI"} | ${formatBeijingTime(item.time)}`;
+    node.innerHTML = `
+      <div class="ai-chat-meta">${escapeHtml(meta)}</div>
+      <div class="ai-chat-text">${escapeHtml(item.content || "").replace(/\n/g, "<br/>")}</div>
+    `;
+    container.appendChild(node);
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+async function sendRunChatMessage(inputId, logId, sendBtnId, runId) {
+  const input = document.getElementById(inputId);
+  const button = document.getElementById(sendBtnId);
+  if (!input || !button) return;
+  const message = input.value.trim();
+  if (!message) return;
+  if (!runId) {
+    showToast("请先选择执行记录", "error");
+    return;
+  }
+  if (!state.runChatMessages[runId]) state.runChatMessages[runId] = [];
+  state.runChatMessages[runId].push({
+    role: "user",
+    content: message,
+    time: new Date().toISOString(),
+  });
+  renderRunChatLog(logId, runId);
+  input.value = "";
+  button.disabled = true;
+  const oldText = button.textContent;
+  button.textContent = "处理中...";
+  try {
+    const history = state.runChatMessages[runId]
+      .slice(-12)
+      .map((m) => ({ role: m.role, content: m.content }));
+    const result = await apiFetch("/api/ai/run-chat", {
+      method: "POST",
+      body: JSON.stringify({ runId, message, history }),
+    });
+    const actionLine =
+      result.appliedCount > 0
+        ? `\n\n已更新 ${result.appliedCount} 条 Bug 状态。`
+        : "";
+    state.runChatMessages[runId].push({
+      role: "assistant",
+      content: `${result.reply || "已处理。"}${actionLine}`,
+      time: new Date().toISOString(),
+    });
+    renderRunChatLog(logId, runId);
+    if (result.appliedCount > 0) {
+      await loadBugsOnly();
+      renderBugList();
+      showToast(`AI 已更新 ${result.appliedCount} 条 Bug 状态`);
+    } else {
+      showToast("AI 已回复");
+    }
+  } catch (error) {
+    state.runChatMessages[runId].push({
+      role: "assistant",
+      content: `处理失败：${error.message}`,
+      time: new Date().toISOString(),
+    });
+    renderRunChatLog(logId, runId);
+    showToast(`AI 对话失败: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = oldText || "发送";
+  }
+}
+
+async function retestCase(interfaceId, caseId) {
+  if (!interfaceId || !caseId) {
+    showToast("无法重测：缺少接口或用例信息", "error");
+    return;
+  }
+  try {
+    const result = await apiFetch(
+      `/api/interfaces/${interfaceId}/cases/${caseId}/run`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+    const status = result.pass ? "通过" : "失败";
+    showToast(`重测完成: ${status} — ${result.assertionSummary || ""}`);
+  } catch (error) {
+    showToast(`重测失败: ${error.message}`, "error");
+  }
+}
+
 function getSelectedInterface() {
-  return state.interfaces.find((item) => item.id === state.selectedInterfaceId) || null;
+  return (
+    state.interfaces.find((item) => item.id === state.selectedInterfaceId) ||
+    null
+  );
 }
 
 function getSelectedCase() {
   const apiInterface = getSelectedInterface();
-  return apiInterface?.cases?.find((item) => item.id === state.selectedCaseId) || null;
+  return (
+    apiInterface?.cases?.find((item) => item.id === state.selectedCaseId) ||
+    null
+  );
 }
 
 function renderInterfaceList() {
-  const container = $('#interface-list');
+  const container = $("#interface-list");
   if (!container) return;
-  container.innerHTML = '';
+  container.innerHTML = "";
 
   if (!state.interfaces.length) {
     container.innerHTML = '<div class="list-item muted">暂无接口</div>';
@@ -414,16 +673,16 @@ function renderInterfaceList() {
   }
 
   for (const item of state.interfaces) {
-    const row = document.createElement('div');
-    row.className = `list-item ${item.id === state.selectedInterfaceId ? 'active' : ''}`;
+    const row = document.createElement("div");
+    row.className = `list-item ${item.id === state.selectedInterfaceId ? "active" : ""}`;
     row.innerHTML = `
-      <strong>${escapeHtml(item.name || '')}</strong>
-      <div class="muted">${escapeHtml(item.method || 'GET')} ${escapeHtml(item.path || '')}</div>
+      <strong>${escapeHtml(item.name || "")}</strong>
+      <div class="muted">${escapeHtml(item.method || "GET")} ${escapeHtml(item.path || "")}</div>
       <div class="tiny-muted">${(item.cases || []).length} 条用例</div>
     `;
     row.onclick = () => {
       state.selectedInterfaceId = item.id;
-      state.selectedCaseId = '';
+      state.selectedCaseId = "";
       renderInterfaceList();
       populateInterfaceForm();
       renderCaseList();
@@ -435,21 +694,21 @@ function renderInterfaceList() {
 
 function populateInterfaceForm() {
   const item = getSelectedInterface();
-  $('#interface-id').value = item?.id || '';
-  $('#interface-name').value = item?.name || '';
-  $('#interface-method').value = item?.method || 'GET';
-  $('#interface-path').value = item?.path || '';
-  $('#interface-description').value = item?.description || '';
-  $('#interface-headers').value = JSON.stringify(item?.headers || {}, null, 2);
-  $('#interface-body').value = item?.bodyTemplate || '';
+  $("#interface-id").value = item?.id || "";
+  $("#interface-name").value = item?.name || "";
+  $("#interface-method").value = item?.method || "GET";
+  $("#interface-path").value = item?.path || "";
+  $("#interface-description").value = item?.description || "";
+  $("#interface-headers").value = JSON.stringify(item?.headers || {}, null, 2);
+  $("#interface-body").value = item?.bodyTemplate || "";
 }
 
 function renderCaseAuthOptions() {
-  const select = $('#case-auth-profile');
+  const select = $("#case-auth-profile");
   if (!select) return;
   select.innerHTML = '<option value="">无账号</option>';
   for (const profile of getAuthProfiles()) {
-    const option = document.createElement('option');
+    const option = document.createElement("option");
     option.value = profile.id;
     option.textContent = profile.name;
     select.appendChild(option);
@@ -457,31 +716,35 @@ function renderCaseAuthOptions() {
 }
 
 function renderRunAuthOptions() {
-  const select = $('#run-auth-profile');
+  const select = $("#run-auth-profile");
   if (!select) return;
   select.innerHTML = [
     '<option value="__case__">按用例账号执行</option>',
     '<option value="__public__">无账号执行</option>',
-  ].join('');
+  ].join("");
 
   for (const profile of getAuthProfiles()) {
-    const option = document.createElement('option');
+    const option = document.createElement("option");
     option.value = profile.id;
     option.textContent = `覆盖执行: ${profile.name}`;
     select.appendChild(option);
   }
 
-  const validValues = new Set(['__case__', '__public__', ...getAuthProfiles().map((item) => item.id)]);
+  const validValues = new Set([
+    "__case__",
+    "__public__",
+    ...getAuthProfiles().map((item) => item.id),
+  ]);
   if (!validValues.has(state.runAuthProfileId)) {
-    state.runAuthProfileId = '__case__';
+    state.runAuthProfileId = "__case__";
   }
   select.value = state.runAuthProfileId;
 }
 
 function renderCaseList() {
-  const container = $('#case-list');
+  const container = $("#case-list");
   if (!container) return;
-  container.innerHTML = '';
+  container.innerHTML = "";
   const apiInterface = getSelectedInterface();
   if (!apiInterface) {
     container.innerHTML = '<div class="list-item muted">请先选择接口</div>';
@@ -495,11 +758,11 @@ function renderCaseList() {
   }
 
   for (const item of cases) {
-    const row = document.createElement('div');
-    row.className = `list-item ${item.id === state.selectedCaseId ? 'active' : ''}`;
+    const row = document.createElement("div");
+    row.className = `list-item ${item.id === state.selectedCaseId ? "active" : ""}`;
     row.innerHTML = `
-      <strong>${escapeHtml(item.name || '')}</strong>
-      <div class="muted">${escapeHtml(item.description || '')}</div>
+      <strong>${escapeHtml(item.name || "")}</strong>
+      <div class="muted">${escapeHtml(item.description || "")}</div>
       <div class="tiny-muted">账号: ${escapeHtml(getAuthProfileName(item.authProfileId))}</div>
     `;
     row.onclick = () => {
@@ -513,67 +776,82 @@ function renderCaseList() {
 
 function populateCaseForm() {
   const item = getSelectedCase();
-  $('#case-id').value = item?.id || '';
-  $('#case-name').value = item?.name || '';
-  $('#case-description').value = item?.description || '';
-  $('#case-auth-profile').value = item?.authProfileId || '';
-  $('#case-path-params').value = JSON.stringify(item?.pathParams || {}, null, 2);
-  $('#case-headers').value = JSON.stringify(item?.headers || {}, null, 2);
-  $('#case-body').value = item?.body || '';
-  $('#expected-business-code').value = item?.expected?.businessCode ?? '';
-  $('#expected-message').value = parseMessageIncludes(item?.expected?.messageIncludes).join('||');
+  $("#case-id").value = item?.id || "";
+  $("#case-name").value = item?.name || "";
+  $("#case-description").value = item?.description || "";
+  $("#case-auth-profile").value = item?.authProfileId || "";
+  $("#case-path-params").value = JSON.stringify(
+    item?.pathParams || {},
+    null,
+    2,
+  );
+  $("#case-headers").value = JSON.stringify(item?.headers || {}, null, 2);
+  $("#case-body").value = item?.body || "";
+  $("#expected-business-code").value = item?.expected?.businessCode ?? "";
+  $("#expected-message").value = parseMessageIncludes(
+    item?.expected?.messageIncludes,
+  ).join("||");
 }
 
 function normalizeAiSettings(ai = {}) {
-  const authMode = String(ai.authMode || 'api_key').trim().toLowerCase() === 'oos' ? 'oos' : 'api_key';
+  const authMode =
+    String(ai.authMode || "api_key")
+      .trim()
+      .toLowerCase() === "oos"
+      ? "oos"
+      : "api_key";
   return {
     enabled: Boolean(ai.enabled),
     autoAnalyzeOnRun: Boolean(ai.autoAnalyzeOnRun),
-    url: String(ai.url || ''),
-    apiKey: String(ai.apiKey || ''),
-    oosToken: String(ai.oosToken || ''),
-    oosCookie: String(ai.oosCookie || ''),
-    oosUserAgent: String(ai.oosUserAgent || ''),
-    oosBrowserSessionId: String(ai.oosBrowserSessionId || ''),
-    model: String(ai.model || ''),
-    wireApi: String(ai.wireApi || ''),
-    globalInstruction: String(ai.globalInstruction || ''),
+    url: String(ai.url || ""),
+    apiKey: String(ai.apiKey || ""),
+    oosToken: String(ai.oosToken || ""),
+    oosCookie: String(ai.oosCookie || ""),
+    oosUserAgent: String(ai.oosUserAgent || ""),
+    oosBrowserSessionId: String(ai.oosBrowserSessionId || ""),
+    model: String(ai.model || ""),
+    wireApi: String(ai.wireApi || ""),
+    globalInstruction: String(ai.globalInstruction || ""),
     authMode,
   };
 }
 
 function syncAiAuthModeUI() {
-  const mode = $('#ai-auth-mode').value;
-  const apiKeyWrap = $('#ai-api-key-wrap');
-  const oosTokenWrap = $('#ai-oos-token-wrap');
-  const oosCookieWrap = $('#ai-oos-cookie-wrap');
-  const oosUserAgentWrap = $('#ai-oos-user-agent-wrap');
-  const oosVerifyRow = $('#ai-oos-verify-row');
-  const oosStatus = $('#ai-oos-browser-status');
-  const aiUrl = $('#ai-url');
+  const mode = $("#ai-auth-mode").value;
+  const apiKeyWrap = $("#ai-api-key-wrap");
+  const oosTokenWrap = $("#ai-oos-token-wrap");
+  const oosCookieWrap = $("#ai-oos-cookie-wrap");
+  const oosUserAgentWrap = $("#ai-oos-user-agent-wrap");
+  const oosVerifyRow = $("#ai-oos-verify-row");
+  const oosStatus = $("#ai-oos-browser-status");
+  const aiUrl = $("#ai-url");
 
-  if (mode === 'oos') {
-    apiKeyWrap.style.display = 'none';
-    oosTokenWrap.style.display = '';
-    oosCookieWrap.style.display = '';
-    oosUserAgentWrap.style.display = '';
-    oosVerifyRow.style.display = '';
-    oosStatus.style.display = '';
+  if (mode === "oos") {
+    apiKeyWrap.style.display = "none";
+    oosTokenWrap.style.display = "";
+    oosCookieWrap.style.display = "";
+    oosUserAgentWrap.style.display = "";
+    oosVerifyRow.style.display = "";
+    oosStatus.style.display = "";
     const current = aiUrl.value.trim();
-    if (!current || (!/^https?:\/\/([^/]+\.)?chatgpt\.com(\/|$)/i.test(current) && !/\/backend-api(\/|$)/i.test(current))) {
-      aiUrl.value = 'https://chatgpt.com';
+    if (
+      !current ||
+      (!/^https?:\/\/([^/]+\.)?chatgpt\.com(\/|$)/i.test(current) &&
+        !/\/backend-api(\/|$)/i.test(current))
+    ) {
+      aiUrl.value = "https://chatgpt.com";
     }
-    aiUrl.placeholder = 'https://chatgpt.com';
+    aiUrl.placeholder = "https://chatgpt.com";
   } else {
     stopOosLoginPolling();
-    apiKeyWrap.style.display = '';
-    oosTokenWrap.style.display = 'none';
-    oosCookieWrap.style.display = 'none';
-    oosUserAgentWrap.style.display = 'none';
-    oosVerifyRow.style.display = 'none';
-    oosStatus.style.display = 'none';
+    apiKeyWrap.style.display = "";
+    oosTokenWrap.style.display = "none";
+    oosCookieWrap.style.display = "none";
+    oosUserAgentWrap.style.display = "none";
+    oosVerifyRow.style.display = "none";
+    oosStatus.style.display = "none";
     if (!aiUrl.value.trim()) {
-      aiUrl.placeholder = 'https://api.openai.com/v1';
+      aiUrl.placeholder = "https://api.openai.com/v1";
     }
   }
 }
@@ -581,46 +859,48 @@ function syncAiAuthModeUI() {
 function renderSettings() {
   if (!state.settings) return;
 
-  state.settings.executionMode = state.settings.executionMode === 'case_runner' ? 'case_runner' : 'ai_agent';
-  $('#settings-base-url').value = state.settings.baseUrl || '';
-  $('#settings-execution-mode').value = state.settings.executionMode || 'ai_agent';
+  state.settings.executionMode =
+    state.settings.executionMode === "case_runner" ? "case_runner" : "ai_agent";
+  $("#settings-base-url").value = state.settings.baseUrl || "";
+  $("#settings-execution-mode").value =
+    state.settings.executionMode || "ai_agent";
   const ai = normalizeAiSettings(state.settings.ai || {});
   state.settings.ai = { ...(state.settings.ai || {}), ...ai };
 
-  $('#ai-enabled').checked = ai.enabled;
-  $('#ai-auto-run').checked = ai.autoAnalyzeOnRun;
-  $('#ai-url').value = ai.url;
-  $('#ai-auth-mode').value = ai.authMode;
-  $('#ai-api-key').value = ai.apiKey;
-  $('#ai-oos-token').value = ai.oosToken;
-  $('#ai-oos-cookie').value = ai.oosCookie;
-  $('#ai-oos-user-agent').value = ai.oosUserAgent;
-  $('#ai-model').value = ai.model;
-  $('#ai-global-instruction').value = ai.globalInstruction;
+  $("#ai-enabled").checked = ai.enabled;
+  $("#ai-auto-run").checked = ai.autoAnalyzeOnRun;
+  $("#ai-url").value = ai.url;
+  $("#ai-auth-mode").value = ai.authMode;
+  $("#ai-api-key").value = ai.apiKey;
+  $("#ai-oos-token").value = ai.oosToken;
+  $("#ai-oos-cookie").value = ai.oosCookie;
+  $("#ai-oos-user-agent").value = ai.oosUserAgent;
+  $("#ai-model").value = ai.model;
+  $("#ai-global-instruction").value = ai.globalInstruction;
   syncAiAuthModeUI();
 
-  const container = $('#auth-profile-list');
-  container.innerHTML = '';
+  const container = $("#auth-profile-list");
+  container.innerHTML = "";
   const profiles = state.settings.authProfiles || [];
 
   profiles.forEach((profile, index) => {
-    const card = document.createElement('div');
-    card.className = 'card';
+    const card = document.createElement("div");
+    card.className = "card";
     card.innerHTML = `
-      <label>账号名称<input data-auth-index="${index}" data-field="name" value="${escapeHtml(profile.name || '')}" /></label>
-      <label>账号 ID<input data-auth-index="${index}" data-field="id" value="${escapeHtml(profile.id || '')}" /></label>
+      <label>账号名称<input data-auth-index="${index}" data-field="name" value="${escapeHtml(profile.name || "")}" /></label>
+      <label>账号 ID<input data-auth-index="${index}" data-field="id" value="${escapeHtml(profile.id || "")}" /></label>
       <label>类型
         <select data-auth-index="${index}" data-field="type">
-          <option value="bearer" ${profile.type === 'bearer' ? 'selected' : ''}>Bearer</option>
+          <option value="bearer" ${profile.type === "bearer" ? "selected" : ""}>Bearer</option>
         </select>
       </label>
-      <label>Token<input data-auth-index="${index}" data-field="token" value="${escapeHtml(profile.token || '')}" /></label>
+      <label>Token<input data-auth-index="${index}" data-field="token" value="${escapeHtml(profile.token || "")}" /></label>
       <button type="button" class="danger" data-delete-auth="${index}">删除账号</button>
     `;
     container.appendChild(card);
   });
 
-  container.querySelectorAll('[data-delete-auth]').forEach((button) => {
+  container.querySelectorAll("[data-delete-auth]").forEach((button) => {
     button.onclick = () => {
       const index = Number(button.dataset.deleteAuth);
       state.settings.authProfiles.splice(index, 1);
@@ -631,7 +911,7 @@ function renderSettings() {
     };
   });
 
-  container.querySelectorAll('[data-auth-index]').forEach((input) => {
+  container.querySelectorAll("[data-auth-index]").forEach((input) => {
     input.oninput = () => {
       const index = Number(input.dataset.authIndex);
       const field = input.dataset.field;
@@ -645,32 +925,40 @@ function renderSettings() {
 }
 
 function clearSelectedRunDetail() {
-  $('#selected-run-meta').textContent = '暂无选中记录';
-  renderRunTable('#selected-run-results', []);
-  $('#selected-run-ai-report').textContent = '暂无 AI 分析';
+  $("#selected-run-meta").textContent = "暂无选中记录";
+  renderRunTable("#selected-run-results", []);
+  $("#selected-run-ai-report").textContent = "暂无 AI 分析";
 }
 
 async function loadRunDetail(runId) {
   const run = await apiFetch(`/api/runs/${runId}`);
-  $('#selected-run-meta').textContent = `记录 ${run.id} | 开始 ${formatBeijingTime(run.startedAt)} | ${getExecutionProfileLabel(run)} | 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`;
-  renderRunTable('#selected-run-results', run.results || []);
-  $('#selected-run-ai-report').textContent = run.aiReport || '暂无 AI 分析';
+  $("#selected-run-meta").textContent =
+    `记录 ${run.id} | 开始 ${formatBeijingTime(run.startedAt)} | ${getExecutionProfileLabel(run)} | 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`;
+  renderRunTable("#selected-run-results", run.results || []);
+  $("#selected-run-ai-report").textContent = run.aiReport || "暂无 AI 分析";
+
+  const selectedRunChat = $("#selected-run-chat");
+  if (selectedRunChat) {
+    selectedRunChat.style.display = "";
+    renderRunChatLog("selected-run-chat-log", runId);
+  }
 }
 
 async function deleteRun(runId) {
   const index = state.runs.findIndex((item) => item.id === runId);
   if (index === -1) {
-    showToast('记录不存在', 'error');
+    showToast("记录不存在", "error");
     return;
   }
-  if (!window.confirm('确认删除这条执行记录吗？')) return;
+  if (!window.confirm("确认删除这条执行记录吗？")) return;
 
-  await apiFetch(`/api/runs/${runId}`, { method: 'DELETE' });
+  await apiFetch(`/api/runs/${runId}`, { method: "DELETE" });
   state.runs = state.runs.filter((item) => item.id !== runId);
 
   if (state.selectedRunId === runId) {
-    const fallback = state.runs[index] || state.runs[index - 1] || state.runs[0] || null;
-    state.selectedRunId = fallback?.id || '';
+    const fallback =
+      state.runs[index] || state.runs[index - 1] || state.runs[0] || null;
+    state.selectedRunId = fallback?.id || "";
   }
 
   renderRunList();
@@ -680,13 +968,13 @@ async function deleteRun(runId) {
   } else {
     clearSelectedRunDetail();
   }
-  showToast('执行记录已删除');
+  showToast("执行记录已删除");
 }
 
 function renderRunList() {
-  const container = $('#run-list');
+  const container = $("#run-list");
   if (!container) return;
-  container.innerHTML = '';
+  container.innerHTML = "";
 
   if (!state.runs.length) {
     container.innerHTML = '<div class="list-item muted">暂无执行记录</div>';
@@ -694,8 +982,8 @@ function renderRunList() {
   }
 
   for (const run of state.runs) {
-    const row = document.createElement('div');
-    row.className = `list-item ${run.id === state.selectedRunId ? 'active' : ''}`;
+    const row = document.createElement("div");
+    row.className = `list-item ${run.id === state.selectedRunId ? "active" : ""}`;
     row.innerHTML = `
       <div class="run-list-head">
         <strong>${escapeHtml(run.id.slice(0, 8))}</strong>
@@ -713,41 +1001,52 @@ function renderRunList() {
     container.appendChild(row);
   }
 
-  container.querySelectorAll('[data-delete-run]').forEach((button) => {
+  container.querySelectorAll("[data-delete-run]").forEach((button) => {
     button.onclick = async (event) => {
       event.stopPropagation();
       try {
         await deleteRun(button.dataset.deleteRun);
       } catch (error) {
-        showToast(`删除失败: ${error.message}`, 'error');
+        showToast(`删除失败: ${error.message}`, "error");
       }
     };
   });
 }
 
 async function loadSettingsOnly() {
-  state.settings = await apiFetch('/api/settings');
+  state.settings = await apiFetch("/api/settings");
 }
 
 async function loadInterfacesOnly() {
-  const payload = await apiFetch('/api/interfaces');
+  const payload = await apiFetch("/api/interfaces");
   state.interfaces = payload.interfaces || [];
-  if (!state.selectedInterfaceId || !state.interfaces.some((item) => item.id === state.selectedInterfaceId)) {
-    state.selectedInterfaceId = state.interfaces[0]?.id || '';
-    state.selectedCaseId = '';
+  if (
+    !state.selectedInterfaceId ||
+    !state.interfaces.some((item) => item.id === state.selectedInterfaceId)
+  ) {
+    state.selectedInterfaceId = state.interfaces[0]?.id || "";
+    state.selectedCaseId = "";
   }
 }
 
 async function loadRunsOnly() {
-  const payload = await apiFetch('/api/runs');
+  const payload = await apiFetch("/api/runs");
   state.runs = payload.runs || [];
-  if (!state.selectedRunId || !state.runs.some((item) => item.id === state.selectedRunId)) {
-    state.selectedRunId = state.runs[0]?.id || '';
+  if (
+    !state.selectedRunId ||
+    !state.runs.some((item) => item.id === state.selectedRunId)
+  ) {
+    state.selectedRunId = state.runs[0]?.id || "";
   }
 }
 
 async function loadAll() {
-  await Promise.all([loadSettingsOnly(), loadInterfacesOnly(), loadRunsOnly()]);
+  await Promise.all([
+    loadSettingsOnly(),
+    loadInterfacesOnly(),
+    loadRunsOnly(),
+    loadBugsOnly(),
+  ]);
 
   renderLatestRun();
   renderInterfaceList();
@@ -759,6 +1058,7 @@ async function loadAll() {
   renderSettings();
   renderRunList();
   renderAiChatLog();
+  renderBugList();
 
   if (state.selectedRunId) {
     await loadRunDetail(state.selectedRunId);
@@ -773,18 +1073,18 @@ async function persistSettingsIfDirty() {
 }
 
 async function refreshTabData(tabId) {
-  if (tabId !== 'settings') {
+  if (tabId !== "settings") {
     await persistSettingsIfDirty();
   }
 
-  if (tabId === 'dashboard') {
+  if (tabId === "dashboard") {
     await Promise.all([loadRunsOnly(), loadSettingsOnly()]);
     renderRunAuthOptions();
     renderLatestRun();
     return;
   }
 
-  if (tabId === 'interfaces') {
+  if (tabId === "interfaces") {
     await Promise.all([loadInterfacesOnly(), loadSettingsOnly()]);
     renderInterfaceList();
     populateInterfaceForm();
@@ -795,7 +1095,7 @@ async function refreshTabData(tabId) {
     return;
   }
 
-  if (tabId === 'settings') {
+  if (tabId === "settings") {
     await loadSettingsOnly();
     renderSettings();
     renderCaseAuthOptions();
@@ -803,7 +1103,7 @@ async function refreshTabData(tabId) {
     return;
   }
 
-  if (tabId === 'runs') {
+  if (tabId === "runs") {
     await loadRunsOnly();
     renderRunList();
     if (state.selectedRunId) {
@@ -814,41 +1114,47 @@ async function refreshTabData(tabId) {
     return;
   }
 
-  if (tabId === 'ai-chat') {
+  if (tabId === "ai-chat") {
     await Promise.all([loadSettingsOnly(), loadInterfacesOnly()]);
     renderAiChatLog();
+    return;
+  }
+
+  if (tabId === "bugs") {
+    await loadBugsOnly();
+    renderBugList();
   }
 }
 
 async function saveInterface(event) {
   event.preventDefault();
   const payload = {
-    id: $('#interface-id').value || undefined,
-    name: $('#interface-name').value.trim(),
-    method: $('#interface-method').value,
-    path: $('#interface-path').value.trim(),
-    description: $('#interface-description').value,
-    headers: safeJsonParse($('#interface-headers').value, {}),
-    bodyTemplate: $('#interface-body').value,
+    id: $("#interface-id").value || undefined,
+    name: $("#interface-name").value.trim(),
+    method: $("#interface-method").value,
+    path: $("#interface-path").value.trim(),
+    description: $("#interface-description").value,
+    headers: safeJsonParse($("#interface-headers").value, {}),
+    bodyTemplate: $("#interface-body").value,
   };
 
   if (!payload.name || !payload.path) {
-    showToast('接口名称和路径不能为空', 'error');
+    showToast("接口名称和路径不能为空", "error");
     return;
   }
 
   if (payload.id) {
     await apiFetch(`/api/interfaces/${payload.id}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(payload),
     });
-    showToast('接口已更新');
+    showToast("接口已更新");
   } else {
-    await apiFetch('/api/interfaces', {
-      method: 'POST',
+    await apiFetch("/api/interfaces", {
+      method: "POST",
       body: JSON.stringify(payload),
     });
-    showToast('接口已创建');
+    showToast("接口已创建");
   }
 
   await loadAll();
@@ -857,55 +1163,57 @@ async function saveInterface(event) {
 async function deleteSelectedInterface() {
   const apiInterface = getSelectedInterface();
   if (!apiInterface) {
-    showToast('请先选择接口', 'error');
+    showToast("请先选择接口", "error");
     return;
   }
-  await apiFetch(`/api/interfaces/${apiInterface.id}`, { method: 'DELETE' });
-  state.selectedInterfaceId = '';
-  state.selectedCaseId = '';
+  await apiFetch(`/api/interfaces/${apiInterface.id}`, { method: "DELETE" });
+  state.selectedInterfaceId = "";
+  state.selectedCaseId = "";
   await loadAll();
-  showToast('接口已删除');
+  showToast("接口已删除");
 }
 
 async function saveCase(event) {
   event.preventDefault();
   const apiInterface = getSelectedInterface();
   if (!apiInterface) {
-    showToast('请先选择接口', 'error');
+    showToast("请先选择接口", "error");
     return;
   }
 
   const payload = {
-    id: $('#case-id').value || undefined,
-    name: $('#case-name').value.trim(),
-    description: $('#case-description').value,
-    authProfileId: $('#case-auth-profile').value,
-    pathParams: safeJsonParse($('#case-path-params').value, {}),
-    headers: safeJsonParse($('#case-headers').value, {}),
-    body: $('#case-body').value,
+    id: $("#case-id").value || undefined,
+    name: $("#case-name").value.trim(),
+    description: $("#case-description").value,
+    authProfileId: $("#case-auth-profile").value,
+    pathParams: safeJsonParse($("#case-path-params").value, {}),
+    headers: safeJsonParse($("#case-headers").value, {}),
+    body: $("#case-body").value,
     expected: {
-      businessCode: $('#expected-business-code').value ? Number($('#expected-business-code').value) : null,
-      messageIncludes: $('#expected-message').value.trim(),
+      businessCode: $("#expected-business-code").value
+        ? Number($("#expected-business-code").value)
+        : null,
+      messageIncludes: $("#expected-message").value.trim(),
     },
   };
 
   if (!payload.name) {
-    showToast('用例名称不能为空', 'error');
+    showToast("用例名称不能为空", "error");
     return;
   }
 
   if (payload.id) {
     await apiFetch(`/api/interfaces/${apiInterface.id}/cases/${payload.id}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(payload),
     });
-    showToast('用例已更新');
+    showToast("用例已更新");
   } else {
     await apiFetch(`/api/interfaces/${apiInterface.id}/cases`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(payload),
     });
-    showToast('用例已创建');
+    showToast("用例已创建");
   }
 
   await loadAll();
@@ -915,71 +1223,73 @@ async function deleteSelectedCase() {
   const apiInterface = getSelectedInterface();
   const testCase = getSelectedCase();
   if (!apiInterface || !testCase) {
-    showToast('请先选择用例', 'error');
+    showToast("请先选择用例", "error");
     return;
   }
-  await apiFetch(`/api/interfaces/${apiInterface.id}/cases/${testCase.id}`, { method: 'DELETE' });
-  state.selectedCaseId = '';
+  await apiFetch(`/api/interfaces/${apiInterface.id}/cases/${testCase.id}`, {
+    method: "DELETE",
+  });
+  state.selectedCaseId = "";
   await loadAll();
-  showToast('用例已删除');
+  showToast("用例已删除");
 }
 
 function buildAiPayloadFromForm() {
-  const authMode = $('#ai-auth-mode').value === 'oos' ? 'oos' : 'api_key';
-  const rawUrl = $('#ai-url').value.trim();
-  const normalizedUrl = authMode === 'oos'
-    ? (
-      (/^https?:\/\/([^/]+\.)?chatgpt\.com(\/|$)/i.test(rawUrl) || /\/backend-api(\/|$)/i.test(rawUrl))
+  const authMode = $("#ai-auth-mode").value === "oos" ? "oos" : "api_key";
+  const rawUrl = $("#ai-url").value.trim();
+  const normalizedUrl =
+    authMode === "oos"
+      ? /^https?:\/\/([^/]+\.)?chatgpt\.com(\/|$)/i.test(rawUrl) ||
+        /\/backend-api(\/|$)/i.test(rawUrl)
         ? rawUrl
-        : 'https://chatgpt.com'
-    )
-    : rawUrl;
+        : "https://chatgpt.com"
+      : rawUrl;
   return {
     ...(state.settings?.ai || {}),
-    enabled: $('#ai-enabled').checked,
-    autoAnalyzeOnRun: $('#ai-auto-run').checked,
+    enabled: $("#ai-enabled").checked,
+    autoAnalyzeOnRun: $("#ai-auto-run").checked,
     url: normalizedUrl,
     authMode,
-    apiKey: $('#ai-api-key').value.trim(),
-    oosToken: $('#ai-oos-token').value.trim(),
-    oosCookie: $('#ai-oos-cookie').value.trim(),
-    oosUserAgent: $('#ai-oos-user-agent').value.trim(),
-    model: $('#ai-model').value.trim(),
-    globalInstruction: $('#ai-global-instruction').value.trim(),
+    apiKey: $("#ai-api-key").value.trim(),
+    oosToken: $("#ai-oos-token").value.trim(),
+    oosCookie: $("#ai-oos-cookie").value.trim(),
+    oosUserAgent: $("#ai-oos-user-agent").value.trim(),
+    model: $("#ai-model").value.trim(),
+    globalInstruction: $("#ai-global-instruction").value.trim(),
   };
 }
 
 async function verifyOosLogin() {
   try {
     const ai = buildAiPayloadFromForm();
-    ai.authMode = 'oos';
-    const result = await apiFetch('/api/ai/oos/verify', {
-      method: 'POST',
+    ai.authMode = "oos";
+    const result = await apiFetch("/api/ai/oos/verify", {
+      method: "POST",
       body: JSON.stringify({ ai }),
     });
     showToast(`OOS 登录可用，HTTP ${result.status}`);
   } catch (error) {
-    showToast(`OOS 校验失败: ${error.message}`, 'error');
+    showToast(`OOS 校验失败: ${error.message}`, "error");
   }
 }
 
 function formatOosBrowserStatus(result) {
   return [
-    `sessionId: ${result.sessionId || '-'}`,
-    `model status: ${result.modelStatus ?? '-'}`,
-    `session status: ${result.sessionStatus ?? '-'}`,
-    `has session cookie: ${result.hasSessionCookie ? 'yes' : 'no'}`,
-    `has cf_clearance: ${result.hasCfClearance ? 'yes' : 'no'}`,
-    `token captured: ${result.oosToken ? 'yes' : 'no'}`,
-    `cookie captured: ${result.oosCookie ? 'yes' : 'no'}`,
-    '',
-    String(result.modelSnippet || ''),
-  ].join('\n');
+    `sessionId: ${result.sessionId || "-"}`,
+    `model status: ${result.modelStatus ?? "-"}`,
+    `session status: ${result.sessionStatus ?? "-"}`,
+    `has session cookie: ${result.hasSessionCookie ? "yes" : "no"}`,
+    `has cf_clearance: ${result.hasCfClearance ? "yes" : "no"}`,
+    `token captured: ${result.oosToken ? "yes" : "no"}`,
+    `cookie captured: ${result.oosCookie ? "yes" : "no"}`,
+    "",
+    String(result.modelSnippet || ""),
+  ].join("\n");
 }
 
 async function pollOosBrowserLoginStatus() {
   if (state.oosLoginPollingBusy) return;
-  const sessionId = String(state.oosLoginSessionId || '').trim();
+  const sessionId = String(state.oosLoginSessionId || "").trim();
   if (!sessionId) {
     stopOosLoginPolling();
     return;
@@ -987,35 +1297,43 @@ async function pollOosBrowserLoginStatus() {
 
   state.oosLoginPollingBusy = true;
   try {
-    const status = await apiFetch(`/api/ai/oos/browser-login/${sessionId}/status`, {
-      method: 'GET',
-    });
+    const status = await apiFetch(
+      `/api/ai/oos/browser-login/${sessionId}/status`,
+      {
+        method: "GET",
+      },
+    );
     setOosBrowserStatus(formatOosBrowserStatus(status));
 
     const shouldApply = Boolean(
-      status.ok
-      || status.hasSessionCookie
-      || status.oosCookie
-      || status.oosToken,
+      status.ok ||
+      status.hasSessionCookie ||
+      status.oosCookie ||
+      status.oosToken,
     );
     if (!shouldApply) return;
 
-    const applied = await apiFetch(`/api/ai/oos/browser-login/${sessionId}/apply`, {
-      method: 'POST',
-      body: JSON.stringify({ close: false }),
-    });
+    const applied = await apiFetch(
+      `/api/ai/oos/browser-login/${sessionId}/apply`,
+      {
+        method: "POST",
+        body: JSON.stringify({ close: false }),
+      },
+    );
 
     stopOosLoginPolling();
-    state.oosLoginSessionId = '';
+    state.oosLoginSessionId = "";
     await loadSettingsOnly();
     renderSettings();
     state.settingsDirty = false;
-    setOosBrowserStatus(`Login applied at ${new Date().toISOString()}\n\n${formatOosBrowserStatus(applied.status || {})}`);
-    showToast('OOS 登录成功，已自动写入 AI 配置');
+    setOosBrowserStatus(
+      `Login applied at ${new Date().toISOString()}\n\n${formatOosBrowserStatus(applied.status || {})}`,
+    );
+    showToast("OOS 登录成功，已自动写入 AI 配置");
   } catch (error) {
-    if (/not found/i.test(String(error.message || ''))) {
+    if (/not found/i.test(String(error.message || ""))) {
       stopOosLoginPolling();
-      state.oosLoginSessionId = '';
+      state.oosLoginSessionId = "";
     }
     setOosBrowserStatus(`Polling failed: ${error.message}`);
   } finally {
@@ -1024,41 +1342,43 @@ async function pollOosBrowserLoginStatus() {
 }
 
 async function startOosBrowserLogin() {
-  const button = $('#ai-oos-browser-login-btn');
+  const button = $("#ai-oos-browser-login-btn");
   button.disabled = true;
-  button.textContent = 'Opening...';
+  button.textContent = "Opening...";
 
   try {
-    const result = await apiFetch('/api/ai/oos/browser-login/start', {
-      method: 'POST',
+    const result = await apiFetch("/api/ai/oos/browser-login/start", {
+      method: "POST",
       body: JSON.stringify({ headless: false }),
     });
     if (!result.sessionId) {
-      throw new Error('Browser login sessionId is empty');
+      throw new Error("Browser login sessionId is empty");
     }
 
     state.oosLoginSessionId = result.sessionId;
-    setOosBrowserStatus([
-      result.message || 'Browser login started.',
-      `sessionId: ${result.sessionId}`,
-      `startedAt: ${result.startedAt || '-'}`,
-      '',
-      'Please complete login in the opened ChatGPT window.',
-      'Status will auto-refresh every 3 seconds.',
-    ].join('\n'));
+    setOosBrowserStatus(
+      [
+        result.message || "Browser login started.",
+        `sessionId: ${result.sessionId}`,
+        `startedAt: ${result.startedAt || "-"}`,
+        "",
+        "Please complete login in the opened ChatGPT window.",
+        "Status will auto-refresh every 3 seconds.",
+      ].join("\n"),
+    );
 
     stopOosLoginPolling();
     state.oosLoginTimer = window.setInterval(() => {
       pollOosBrowserLoginStatus().catch(() => {});
     }, 3000);
     await pollOosBrowserLoginStatus();
-    showToast('已打开 ChatGPT 登录窗口，请在浏览器完成登录');
+    showToast("已打开 ChatGPT 登录窗口，请在浏览器完成登录");
   } catch (error) {
     setOosBrowserStatus(`Failed to start browser login: ${error.message}`);
-    showToast(`浏览器登录启动失败: ${error.message}`, 'error');
+    showToast(`浏览器登录启动失败: ${error.message}`, "error");
   } finally {
     button.disabled = false;
-    button.textContent = '打开 ChatGPT 登录并自动接入';
+    button.textContent = "打开 ChatGPT 登录并自动接入";
   }
 }
 
@@ -1066,31 +1386,34 @@ async function saveSettings(event) {
   if (event) event.preventDefault();
   if (!state.settings) return;
 
-  state.settings.baseUrl = $('#settings-base-url').value.trim();
-  state.settings.executionMode = $('#settings-execution-mode').value === 'ai_agent' ? 'ai_agent' : 'case_runner';
+  state.settings.baseUrl = $("#settings-base-url").value.trim();
+  state.settings.executionMode =
+    $("#settings-execution-mode").value === "ai_agent"
+      ? "ai_agent"
+      : "case_runner";
   state.settings.ai = buildAiPayloadFromForm();
-  await apiFetch('/api/settings', {
-    method: 'PUT',
+  await apiFetch("/api/settings", {
+    method: "PUT",
     body: JSON.stringify(state.settings),
   });
 
   state.settingsDirty = false;
   await loadAll();
   if (event) {
-    showToast('设置已保存');
+    showToast("设置已保存");
   }
 }
 
 function buildRunRequestPayload() {
   const payload = {};
-  if (state.runAuthProfileId !== '__case__') {
+  if (state.runAuthProfileId !== "__case__") {
     payload.authProfileId = state.runAuthProfileId;
   }
-  const aiInstruction = ($('#run-ai-instruction')?.value || '').trim();
+  const aiInstruction = ($("#run-ai-instruction")?.value || "").trim();
   if (aiInstruction) {
     payload.aiInstruction = aiInstruction;
   }
-  const aiContext = ($('#run-ai-context')?.value || '').trim();
+  const aiContext = ($("#run-ai-context")?.value || "").trim();
   if (aiContext) {
     payload.aiContext = aiContext;
   }
@@ -1098,14 +1421,14 @@ function buildRunRequestPayload() {
 }
 
 async function runAllCases() {
-  const button = $('#run-all-btn');
+  const button = $("#run-all-btn");
   button.disabled = true;
-  button.textContent = '执行中...';
+  button.textContent = "执行中...";
 
   try {
     await persistSettingsIfDirty();
-    const run = await apiFetch('/api/run-all', {
-      method: 'POST',
+    const run = await apiFetch("/api/run-all", {
+      method: "POST",
       body: JSON.stringify(buildRunRequestPayload()),
     });
 
@@ -1116,17 +1439,28 @@ async function runAllCases() {
 
     if (run.ai?.analyzed) {
       const detail = await apiFetch(`/api/runs/${run.id}`);
-      $('#ai-report').textContent = detail.aiReport || '暂无 AI 分析';
+      $("#ai-report").textContent = detail.aiReport || "暂无 AI 分析";
     } else {
-      $('#ai-report').textContent = '已完成执行，可点击 AI 分析。';
+      $("#ai-report").textContent = "已完成执行，可点击 AI 分析。";
     }
 
-    showToast(`执行完成: 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`);
+    showToast(
+      `执行完成: 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`,
+    );
+
+    state.dashboardRunId = run.id;
+    const dashRunChat = $("#dashboard-run-chat");
+    if (dashRunChat) {
+      dashRunChat.style.display = "";
+      renderRunChatLog("dashboard-run-chat-log", run.id);
+    }
+    await loadBugsOnly();
+    renderBugList();
   } catch (error) {
-    showToast(`执行失败: ${error.message}`, 'error');
+    showToast(`执行失败: ${error.message}`, "error");
   } finally {
     button.disabled = false;
-    button.textContent = '运行全部用例';
+    button.textContent = "运行全部用例";
   }
 }
 
@@ -1134,105 +1468,122 @@ async function analyzeLatest() {
   try {
     const latest = state.runs[0];
     if (!latest) {
-      showToast('暂无可分析记录', 'error');
+      showToast("暂无可分析记录", "error");
       return;
     }
-    const result = await apiFetch(`/api/runs/${latest.id}/analyze`, { method: 'POST' });
-    $('#ai-report').textContent = [result.markdown, ...buildAiMetaLines(result.aiMeta)].filter(Boolean).join('\n\n');
+    const result = await apiFetch(`/api/runs/${latest.id}/analyze`, {
+      method: "POST",
+    });
+    $("#ai-report").textContent = [
+      result.markdown,
+      ...buildAiMetaLines(result.aiMeta),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     await loadAll();
-    showToast('AI 分析完成');
+    showToast("AI 分析完成");
   } catch (error) {
-    showToast(`AI 分析失败: ${error.message}`, 'error');
+    showToast(`AI 分析失败: ${error.message}`, "error");
   }
 }
 
 async function analyzeSelectedRun() {
   try {
     if (!state.selectedRunId) {
-      showToast('请先选择历史记录', 'error');
+      showToast("请先选择历史记录", "error");
       return;
     }
-    const result = await apiFetch(`/api/runs/${state.selectedRunId}/analyze`, { method: 'POST' });
-    $('#selected-run-ai-report').textContent = [result.markdown, ...buildAiMetaLines(result.aiMeta)]
+    const result = await apiFetch(`/api/runs/${state.selectedRunId}/analyze`, {
+      method: "POST",
+    });
+    $("#selected-run-ai-report").textContent = [
+      result.markdown,
+      ...buildAiMetaLines(result.aiMeta),
+    ]
       .filter(Boolean)
-      .join('\n\n');
+      .join("\n\n");
     await loadAll();
     await loadRunDetail(state.selectedRunId);
-    showToast('AI 分析完成');
+    showToast("AI 分析完成");
   } catch (error) {
-    showToast(`AI 分析失败: ${error.message}`, 'error');
+    showToast(`AI 分析失败: ${error.message}`, "error");
   }
 }
 
 async function handleDocFileChange(event) {
   const file = event.target.files?.[0];
   if (!file) return;
-  $('#api-doc-name').value = file.name;
+  $("#api-doc-name").value = file.name;
   const content = await file.text();
-  $('#api-doc-content').value = content;
+  $("#api-doc-content").value = content;
   showToast(`文档已读取: ${file.name}`);
 }
 
 async function importApiDoc(event) {
   event.preventDefault();
-  const filename = $('#api-doc-name').value.trim() || $('#api-doc-file').files?.[0]?.name || 'api-doc.txt';
-  const content = $('#api-doc-content').value;
+  const filename =
+    $("#api-doc-name").value.trim() ||
+    $("#api-doc-file").files?.[0]?.name ||
+    "api-doc.txt";
+  const content = $("#api-doc-content").value;
   if (!content.trim()) {
-    showToast('请先提供文档内容', 'error');
+    showToast("请先提供文档内容", "error");
     return;
   }
 
-  const button = $('#import-doc-btn');
+  const button = $("#import-doc-btn");
   button.disabled = true;
-  button.textContent = '导入中...';
+  button.textContent = "导入中...";
 
   try {
     await persistSettingsIfDirty();
-    const result = await apiFetch('/api/interfaces/import-doc', {
-      method: 'POST',
+    const result = await apiFetch("/api/interfaces/import-doc", {
+      method: "POST",
       body: JSON.stringify({ filename, content }),
     });
 
     const analysisBlock = result.analysis
-      ? ['业务分析:', JSON.stringify(result.analysis, null, 2), '']
+      ? ["业务分析:", JSON.stringify(result.analysis, null, 2), ""]
       : [];
 
-    $('#api-doc-result').textContent = [
+    $("#api-doc-result").textContent = [
       `提供方: ${result.provider}`,
       ...buildAiMetaLines(result.aiMeta),
       `识别接口数: ${result.recognizedInterfaces}`,
       `新增接口数: ${result.addedInterfaces}`,
       `合并接口数: ${result.mergedInterfaces}`,
       `新增用例数: ${result.addedCases}`,
-      '',
+      "",
       ...analysisBlock,
       ...(result.notes || []),
-    ].join('\n');
+    ].join("\n");
 
     await loadAll();
-    showToast(`导入完成: 新增接口 ${result.addedInterfaces}，新增用例 ${result.addedCases}`);
+    showToast(
+      `导入完成: 新增接口 ${result.addedInterfaces}，新增用例 ${result.addedCases}`,
+    );
   } catch (error) {
-    showToast(`导入失败: ${error.message}`, 'error');
+    showToast(`导入失败: ${error.message}`, "error");
   } finally {
     button.disabled = false;
-    button.textContent = 'AI 识别接口并补全用例';
+    button.textContent = "AI 识别接口并补全用例";
   }
 }
 
 function bindSettingsDirtyInputs() {
   const ids = [
-    '#settings-base-url',
-    '#settings-execution-mode',
-    '#ai-enabled',
-    '#ai-auto-run',
-    '#ai-url',
-    '#ai-auth-mode',
-    '#ai-api-key',
-    '#ai-oos-token',
-    '#ai-oos-cookie',
-    '#ai-oos-user-agent',
-    '#ai-model',
-    '#ai-global-instruction',
+    "#settings-base-url",
+    "#settings-execution-mode",
+    "#ai-enabled",
+    "#ai-auto-run",
+    "#ai-url",
+    "#ai-auth-mode",
+    "#ai-api-key",
+    "#ai-oos-token",
+    "#ai-oos-cookie",
+    "#ai-oos-user-agent",
+    "#ai-model",
+    "#ai-global-instruction",
   ];
 
   for (const id of ids) {
@@ -1240,99 +1591,99 @@ function bindSettingsDirtyInputs() {
     if (!node) continue;
     node.oninput = () => {
       markSettingsDirty();
-      if (id === '#ai-auth-mode') syncAiAuthModeUI();
+      if (id === "#ai-auth-mode") syncAiAuthModeUI();
     };
     node.onchange = node.oninput;
   }
 }
 
-window.addEventListener('DOMContentLoaded', async () => {
-  document.querySelectorAll('.nav-btn').forEach((button) => {
+window.addEventListener("DOMContentLoaded", async () => {
+  document.querySelectorAll(".nav-btn").forEach((button) => {
     button.onclick = async () => {
       const tabId = button.dataset.tab;
       showTab(tabId);
       try {
         await refreshTabData(tabId);
       } catch (error) {
-        showToast(`刷新 ${tabId} 失败: ${error.message}`, 'error');
+        showToast(`刷新 ${tabId} 失败: ${error.message}`, "error");
       }
     };
   });
 
-  $('#interface-form').onsubmit = async (event) => {
+  $("#interface-form").onsubmit = async (event) => {
     try {
       await saveInterface(event);
     } catch (error) {
-      showToast(`保存接口失败: ${error.message}`, 'error');
+      showToast(`保存接口失败: ${error.message}`, "error");
     }
   };
 
-  $('#case-form').onsubmit = async (event) => {
+  $("#case-form").onsubmit = async (event) => {
     try {
       await saveCase(event);
     } catch (error) {
-      showToast(`保存用例失败: ${error.message}`, 'error');
+      showToast(`保存用例失败: ${error.message}`, "error");
     }
   };
 
-  $('#settings-form').onsubmit = async (event) => {
+  $("#settings-form").onsubmit = async (event) => {
     try {
       await saveSettings(event);
     } catch (error) {
-      showToast(`保存设置失败: ${error.message}`, 'error');
+      showToast(`保存设置失败: ${error.message}`, "error");
     }
   };
 
-  $('#import-doc-form').onsubmit = importApiDoc;
-  $('#api-doc-file').onchange = async (event) => {
+  $("#import-doc-form").onsubmit = importApiDoc;
+  $("#api-doc-file").onchange = async (event) => {
     try {
       await handleDocFileChange(event);
     } catch (error) {
-      showToast(`读取文档失败: ${error.message}`, 'error');
+      showToast(`读取文档失败: ${error.message}`, "error");
     }
   };
-  $('#run-all-btn').onclick = runAllCases;
-  $('#analyze-latest-btn').onclick = analyzeLatest;
-  $('#analyze-selected-run-btn').onclick = analyzeSelectedRun;
-  $('#run-auth-profile').onchange = (event) => {
+  $("#run-all-btn").onclick = runAllCases;
+  $("#analyze-latest-btn").onclick = analyzeLatest;
+  $("#analyze-selected-run-btn").onclick = analyzeSelectedRun;
+  $("#run-auth-profile").onchange = (event) => {
     state.runAuthProfileId = event.target.value;
   };
 
-  $('#new-interface-btn').onclick = () => {
-    state.selectedInterfaceId = '';
-    state.selectedCaseId = '';
+  $("#new-interface-btn").onclick = () => {
+    state.selectedInterfaceId = "";
+    state.selectedCaseId = "";
     populateInterfaceForm();
     renderCaseList();
     populateCaseForm();
   };
 
-  $('#delete-interface-btn').onclick = async () => {
+  $("#delete-interface-btn").onclick = async () => {
     try {
       await deleteSelectedInterface();
     } catch (error) {
-      showToast(`删除接口失败: ${error.message}`, 'error');
+      showToast(`删除接口失败: ${error.message}`, "error");
     }
   };
 
-  $('#new-case-btn').onclick = () => {
-    state.selectedCaseId = '';
+  $("#new-case-btn").onclick = () => {
+    state.selectedCaseId = "";
     populateCaseForm();
   };
 
-  $('#delete-case-btn').onclick = async () => {
+  $("#delete-case-btn").onclick = async () => {
     try {
       await deleteSelectedCase();
     } catch (error) {
-      showToast(`删除用例失败: ${error.message}`, 'error');
+      showToast(`删除用例失败: ${error.message}`, "error");
     }
   };
 
-  $('#new-auth-profile-btn').onclick = () => {
+  $("#new-auth-profile-btn").onclick = () => {
     state.settings.authProfiles.push({
       id: `profile-${Date.now()}`,
-      name: 'New Profile',
-      type: 'bearer',
-      token: '',
+      name: "New Profile",
+      type: "bearer",
+      token: "",
     });
     markSettingsDirty();
     renderSettings();
@@ -1340,13 +1691,53 @@ window.addEventListener('DOMContentLoaded', async () => {
     renderRunAuthOptions();
   };
 
-  $('#ai-oos-verify-btn').onclick = verifyOosLogin;
-  $('#ai-oos-browser-login-btn').onclick = startOosBrowserLogin;
-  $('#ai-chat-send-btn').onclick = sendAiChatMessage;
-  $('#ai-chat-clear-btn').onclick = clearAiChatMessages;
+  $("#ai-oos-verify-btn").onclick = verifyOosLogin;
+  $("#ai-oos-browser-login-btn").onclick = startOosBrowserLogin;
+  $("#ai-chat-send-btn").onclick = sendAiChatMessage;
+  $("#ai-chat-clear-btn").onclick = clearAiChatMessages;
+
+  $("#bug-filter-status").onchange = (event) => {
+    state.bugFilterStatus = event.target.value;
+    renderBugList();
+  };
+
+  $("#clear-fixed-bugs-btn").onclick = async () => {
+    try {
+      await clearFixedBugs();
+    } catch (error) {
+      showToast(`清除失败: ${error.message}`, "error");
+    }
+  };
+
+  $("#dashboard-run-chat-send").onclick = async () => {
+    try {
+      await sendRunChatMessage(
+        "dashboard-run-chat-input",
+        "dashboard-run-chat-log",
+        "dashboard-run-chat-send",
+        state.dashboardRunId,
+      );
+    } catch (error) {
+      showToast(`AI 对话失败: ${error.message}`, "error");
+    }
+  };
+
+  $("#selected-run-chat-send").onclick = async () => {
+    try {
+      await sendRunChatMessage(
+        "selected-run-chat-input",
+        "selected-run-chat-log",
+        "selected-run-chat-send",
+        state.selectedRunId,
+      );
+    } catch (error) {
+      showToast(`AI 对话失败: ${error.message}`, "error");
+    }
+  };
+
   bindSettingsDirtyInputs();
 
-  window.addEventListener('beforeunload', () => {
+  window.addEventListener("beforeunload", () => {
     stopOosLoginPolling();
   });
 

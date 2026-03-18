@@ -153,25 +153,25 @@ function buildAiMetaLines(aiMeta) {
   if (!aiMeta) return [];
   const lines = [];
   if (aiMeta.authMode) lines.push(`认证方式: ${aiMeta.authMode}`);
-  if (aiMeta.wireApi) lines.push(`AI wire API: ${aiMeta.wireApi}`);
-  if (aiMeta.endpoint) lines.push(`AI endpoint: ${aiMeta.endpoint}`);
-  if (aiMeta.status != null) lines.push(`AI status: ${aiMeta.status}`);
-  if (aiMeta.reason) lines.push(`AI detail: ${aiMeta.reason}`);
+  if (aiMeta.wireApi) lines.push(`AI 协议: ${aiMeta.wireApi}`);
+  if (aiMeta.endpoint) lines.push(`AI 地址: ${aiMeta.endpoint}`);
+  if (aiMeta.status != null) lines.push(`AI 状态: ${aiMeta.status}`);
+  if (aiMeta.reason) lines.push(`AI 详情: ${aiMeta.reason}`);
   if (Array.isArray(aiMeta.attempts) && aiMeta.attempts.length) {
     lines.push(
-      `AI attempts: ${aiMeta.attempts
+      `AI 尝试链路: ${aiMeta.attempts
         .map((item) => `${item.wireApi}${item.variant ? `/${item.variant}` : ''} ${item.status} ${item.endpoint}`)
         .join(' | ')}`,
     );
   }
   if (aiMeta.planMeta?.endpoint) {
-    lines.push(`AI plan endpoint: ${aiMeta.planMeta.endpoint}`);
+    lines.push(`AI 计划地址: ${aiMeta.planMeta.endpoint}`);
   }
   if (aiMeta.judgeMeta?.endpoint) {
-    lines.push(`AI judge endpoint: ${aiMeta.judgeMeta.endpoint}`);
+    lines.push(`AI 判定地址: ${aiMeta.judgeMeta.endpoint}`);
   }
   if (aiMeta.scenarioCount != null) {
-    lines.push(`AI planned scenarios: ${aiMeta.scenarioCount}`);
+    lines.push(`AI 计划场景数: ${aiMeta.scenarioCount}`);
   }
   return lines;
 }
@@ -1194,16 +1194,16 @@ async function importApiDoc(event) {
     });
 
     const analysisBlock = result.analysis
-      ? ['Business analysis:', JSON.stringify(result.analysis, null, 2), '']
+      ? ['业务分析:', JSON.stringify(result.analysis, null, 2), '']
       : [];
 
     $('#api-doc-result').textContent = [
-      `Provider: ${result.provider}`,
+      `提供方: ${result.provider}`,
       ...buildAiMetaLines(result.aiMeta),
-      `Recognized interfaces: ${result.recognizedInterfaces}`,
-      `Added interfaces: ${result.addedInterfaces}`,
-      `Merged interfaces: ${result.mergedInterfaces}`,
-      `Added cases: ${result.addedCases}`,
+      `识别接口数: ${result.recognizedInterfaces}`,
+      `新增接口数: ${result.addedInterfaces}`,
+      `合并接口数: ${result.mergedInterfaces}`,
+      `新增用例数: ${result.addedCases}`,
       '',
       ...analysisBlock,
       ...(result.notes || []),

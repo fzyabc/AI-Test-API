@@ -809,7 +809,7 @@ app.post('/api/interfaces/import-doc', asyncHandler(async (req, res) => {
   await saveDocContexts(docPayload);
 
   res.json({
-    message: 'API document imported',
+    message: 'API 文档导入完成',
     provider: result.provider,
     aiMeta: result.meta,
     recognizedInterfaces: result.recognizedInterfaces,

@@ -257,7 +257,7 @@ function buildResultDetailsHtml(item) {
         <pre>${escapeHtml(buildRetryText(item.retry))}</pre>
       </div>
     </details>
-    ${item.interfaceId && item.caseId ? `<div class="result-retest-row"><button type="button" class="secondary subtle-btn" data-retest-interface="${escapeHtml(item.interfaceId)}" data-retest-case="${escapeHtml(item.caseId)}">重测此用例</button></div>` : ""}
+    ${item.interfaceId && item.caseId ? `<div class="result-retest-row"><button type="button" class="secondary subtle-btn" data-retest-interface="${escapeHtml(item.interfaceId)}" data-retest-case="${escapeHtml(item.caseId)}">重测此用例 ▾</button></div>` : ""}
   `;
 }
 
@@ -279,19 +279,68 @@ function renderRunTable(tbodySelector, results) {
   }
 
   tbody.querySelectorAll("[data-retest-interface]").forEach((button) => {
-    button.onclick = async () => {
-      button.disabled = true;
-      const oldText = button.textContent;
-      button.textContent = "重测中...";
-      try {
-        await retestCase(
-          button.dataset.retestInterface,
-          button.dataset.retestCase,
-        );
-      } finally {
-        button.disabled = false;
-        button.textContent = oldText;
+    button.onclick = () => {
+      const row = button.closest(".result-retest-row");
+      const existing = row.querySelector(".retest-panel");
+      if (existing) {
+        existing.remove();
+        button.textContent = "重测此用例 ▾";
+        return;
       }
+      button.textContent = "重测此用例 ▴";
+
+      const panel = document.createElement("div");
+      panel.className = "retest-panel";
+      panel.innerHTML = `
+        <div class="retest-hint">可以告诉 AI 重测原因，AI 会在对话里记录，也可以直接跳过</div>
+        <textarea class="retest-reason" placeholder="重测原因（可选）：例如：这个失败是因为数据前置问题，重测时换一组数据" rows="2"></textarea>
+        <div class="row">
+          <button type="button" class="primary subtle-btn retest-confirm">确认重测</button>
+          <span class="retest-result-text"></span>
+        </div>
+      `;
+      row.appendChild(panel);
+
+      panel.querySelector(".retest-confirm").onclick = async () => {
+        const confirmBtn = panel.querySelector(".retest-confirm");
+        const resultSpan = panel.querySelector(".retest-result-text");
+        const reason = panel.querySelector(".retest-reason").value.trim();
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = "重测中...";
+        resultSpan.textContent = "";
+        resultSpan.className = "retest-result-text";
+        try {
+          const result = await apiFetch(
+            `/api/interfaces/${button.dataset.retestInterface}/cases/${button.dataset.retestCase}/run`,
+            { method: "POST", body: JSON.stringify({ reason }) },
+          );
+          const pass = result.pass;
+          resultSpan.className = `retest-result-text ${pass ? "status-pass" : "status-fail"}`;
+          resultSpan.textContent = `${pass ? "✓ 通过" : "✗ 失败"} — ${result.assertionSummary || ""}`;
+          confirmBtn.textContent = "再次重测";
+          confirmBtn.disabled = false;
+
+          if (reason) {
+            const activeRunId = state.dashboardRunId || state.selectedRunId;
+            if (activeRunId) {
+              if (!state.runChatMessages[activeRunId])
+                state.runChatMessages[activeRunId] = [];
+              state.runChatMessages[activeRunId].push({
+                role: "user",
+                content: `[重测] ${button.dataset.retestCase} 重测原因：${reason}\n重测结果：${pass ? "通过" : "失败"} — ${result.assertionSummary || ""}`,
+                time: new Date().toISOString(),
+              });
+              renderRunChatLog("dashboard-run-chat-log", activeRunId);
+              renderRunChatLog("selected-run-chat-log", activeRunId);
+            }
+          }
+        } catch (error) {
+          resultSpan.className = "retest-result-text status-fail";
+          resultSpan.textContent = `重测失败: ${error.message}`;
+          confirmBtn.textContent = "确认重测";
+          confirmBtn.disabled = false;
+        }
+      };
     };
   });
 }
@@ -448,12 +497,20 @@ function renderBugList() {
       ? state.bugs
       : state.bugs.filter((b) => b.status === state.bugFilterStatus);
 
+  const totalBugs = state.bugs.length;
+  const note =
+    totalBugs === 0
+      ? '<div class="bug-list-note muted">AI 执行后会自动分析失败用例，判断哪些是真实 Bug（注：失败用例数 ≠ Bug 数，数据前置失败、已知限制等不计入）</div>'
+      : `<div class="bug-list-note muted">共 ${totalBugs} 条 Bug（AI 从失败用例中筛选的真实问题；数据前置失败等不计入）</div>`;
+
   if (!filtered.length) {
-    container.innerHTML = '<div class="list-item muted">暂无 Bug 记录</div>';
+    container.innerHTML =
+      note +
+      '<div class="list-item muted" style="margin-top:10px">暂无符合条件的 Bug</div>';
     return;
   }
 
-  container.innerHTML = "";
+  container.innerHTML = note;
   for (const bug of filtered) {
     const card = document.createElement("div");
     card.className = "card bug-card";
@@ -471,7 +528,10 @@ function renderBugList() {
         </select>
         <button type="button" class="danger subtle-btn" data-delete-bug="${escapeHtml(bug.id)}">删除</button>
       </div>
-      <div class="muted bug-meta">${escapeHtml(bug.interfaceName || "")}${bug.caseName ? ` | ${escapeHtml(bug.caseName)}` : ""}</div>
+      <div class="bug-location">
+        <span class="bug-interface-tag">${escapeHtml(bug.method || "")} ${escapeHtml(bug.interfaceName || "未知接口")}</span>
+        ${bug.caseName ? `<span class="bug-case-tag">${escapeHtml(bug.caseName)}</span>` : ""}
+      </div>
       <div class="bug-description">${escapeHtml(bug.description || "")}</div>
       <details class="bug-evidence">
         <summary>查看请求与响应</summary>
@@ -627,23 +687,6 @@ async function sendRunChatMessage(inputId, logId, sendBtnId, runId) {
   } finally {
     button.disabled = false;
     button.textContent = oldText || "发送";
-  }
-}
-
-async function retestCase(interfaceId, caseId) {
-  if (!interfaceId || !caseId) {
-    showToast("无法重测：缺少接口或用例信息", "error");
-    return;
-  }
-  try {
-    const result = await apiFetch(
-      `/api/interfaces/${interfaceId}/cases/${caseId}/run`,
-      { method: "POST", body: JSON.stringify({}) },
-    );
-    const status = result.pass ? "通过" : "失败";
-    showToast(`重测完成: ${status} — ${result.assertionSummary || ""}`);
-  } catch (error) {
-    showToast(`重测失败: ${error.message}`, "error");
   }
 }
 

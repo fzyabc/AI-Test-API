@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Affiliate API 测试平台</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="toast" class="toast hidden"></div>
+  <div class="shell">
+    <aside class="sidebar">
+      <h1>Affiliate QA</h1>
+      <div class="muted">API 自动化与 AI 业务测试</div>
+      <nav>
+        <button type="button" class="nav-btn active" data-tab="dashboard">测试执行</button>
+        <button type="button" class="nav-btn" data-tab="interfaces">接口与用例</button>
+        <button type="button" class="nav-btn" data-tab="settings">系统设置</button>
+        <button type="button" class="nav-btn" data-tab="ai-chat">AI 对话</button>
+        <button type="button" class="nav-btn" data-tab="runs">历史结果</button>
+      </nav>
+    </aside>
+
+    <main id="content" class="content">
+      <section id="dashboard" class="tab-panel active">
+        <div class="panel-header">
+          <div>
+            <h2>测试执行</h2>
+            <div class="muted">选择执行账号，补充本次业务说明，点击一次即可运行</div>
+          </div>
+          <div class="control-stack">
+            <label class="control-label">
+              执行账号
+              <select id="run-auth-profile"></select>
+            </label>
+            <label class="control-label">
+              AI Notes
+              <textarea id="run-ai-instruction" placeholder="给 AI 的额外指令（如：重点关注返佣领取、默认邀请码切换等）"></textarea>
+            </label>
+            <label class="control-label">
+              AI Context (PRD/API/Business)
+              <textarea id="run-ai-context" placeholder="可贴 PRD 片段、业务规则、额外接口说明。仅用于本次执行。"></textarea>
+            </label>
+            <button id="run-all-btn" type="button" class="primary">运行全部用例</button>
+          </div>
+        </div>
+
+        <div id="dashboard-summary" class="summary-grid"></div>
+        <div id="latest-run-meta" class="card muted"></div>
+        <div class="card">
+          <table>
+            <thead>
+              <tr>
+                <th>接口</th>
+                <th>步骤/用例</th>
+                <th>账号</th>
+                <th>结果</th>
+                <th>详情</th>
+              </tr>
+            </thead>
+            <tbody id="latest-run-results"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="row-between">
+            <h3>AI 分析</h3>
+            <button id="analyze-latest-btn" type="button" class="secondary">分析最新结果</button>
+          </div>
+          <pre id="ai-report"></pre>
+        </div>
+      </section>
+
+      <section id="interfaces" class="tab-panel">
+        <div class="panel-header">
+          <div>
+            <h2>接口与用例</h2>
+            <div class="muted">支持手工维护，也支持上传文档让 AI 生成并补充</div>
+          </div>
+          <button id="new-interface-btn" type="button" class="primary">新增接口</button>
+        </div>
+
+        <form id="import-doc-form" class="card">
+          <h3>导入 API 文档</h3>
+          <div class="doc-import-grid">
+            <div>
+              <label>文档文件
+                <input id="api-doc-file" type="file" />
+              </label>
+              <label>文档名称
+                <input id="api-doc-name" type="text" placeholder="Affiliate-Referral-Code-API.md" />
+              </label>
+              <button id="import-doc-btn" type="submit" class="secondary">AI 识别接口并补全用例</button>
+            </div>
+            <div>
+              <label>文档内容
+                <textarea id="api-doc-content" placeholder="可直接粘贴 API/PRD 文档内容"></textarea>
+              </label>
+            </div>
+          </div>
+          <pre id="api-doc-result"></pre>
+        </form>
+
+        <div class="split">
+          <div class="card">
+            <h3>接口列表</h3>
+            <div id="interface-list" class="list"></div>
+          </div>
+
+          <div>
+            <form id="interface-form" class="card">
+              <h3>接口配置</h3>
+              <input id="interface-id" type="hidden" />
+              <label>接口名称<input id="interface-name" type="text" /></label>
+              <label>请求方法
+                <select id="interface-method">
+                  <option>GET</option>
+                  <option>POST</option>
+                  <option>PUT</option>
+                  <option>PATCH</option>
+                  <option>DELETE</option>
+                </select>
+              </label>
+              <label>路径<input id="interface-path" type="text" placeholder="/api/xxx" /></label>
+              <label>描述<textarea id="interface-description"></textarea></label>
+              <label>Headers(JSON)<textarea id="interface-headers">{}</textarea></label>
+              <label>Body 模板<textarea id="interface-body"></textarea></label>
+              <div class="row">
+                <button type="submit" class="primary">保存接口</button>
+                <button id="delete-interface-btn" type="button" class="danger">删除接口</button>
+              </div>
+            </form>
+
+            <div class="card">
+              <div class="row-between">
+                <h3>用例列表</h3>
+                <button id="new-case-btn" type="button" class="secondary">新增用例</button>
+              </div>
+              <div id="case-list" class="list compact"></div>
+            </div>
+
+            <form id="case-form" class="card">
+              <h3>用例配置</h3>
+              <input id="case-id" type="hidden" />
+              <label>用例名称<input id="case-name" type="text" /></label>
+              <label>描述<textarea id="case-description"></textarea></label>
+              <label>执行账号
+                <select id="case-auth-profile"></select>
+              </label>
+              <label>路径参数(JSON)<textarea id="case-path-params">{}</textarea></label>
+              <label>Headers(JSON)<textarea id="case-headers">{}</textarea></label>
+              <label>请求体<textarea id="case-body"></textarea></label>
+              <label>期望业务码(兼容旧数据)<input id="expected-business-code" type="number" /></label>
+              <label>期望 message(兼容旧数据)<input id="expected-message" type="text" /></label>
+              <div class="row">
+                <button type="submit" class="primary">保存用例</button>
+                <button id="delete-case-btn" type="button" class="danger">删除用例</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section id="settings" class="tab-panel">
+        <h2>系统设置</h2>
+        <form id="settings-form" class="card">
+          <label>Base URL<input id="settings-base-url" type="text" placeholder="https://api-test.kuant.ai" /></label>
+          <label>Execution Mode
+            <select id="settings-execution-mode">
+              <option value="ai_agent">AI Agent (business-driven)</option>
+            </select>
+          </label>
+          <hr />
+
+          <div class="row-between">
+            <h3>执行账号</h3>
+            <button id="new-auth-profile-btn" type="button" class="secondary">新增账号</button>
+          </div>
+          <div id="auth-profile-list"></div>
+
+          <hr />
+          <h3>AI 设置</h3>
+          <label class="inline"><input id="ai-enabled" type="checkbox" />启用 AI</label>
+          <label class="inline"><input id="ai-auto-run" type="checkbox" />执行后自动生成 AI 报告</label>
+          <label>AI URL<input id="ai-url" type="text" placeholder="https://api.openai.com/v1" /></label>
+          <label>认证方式
+            <select id="ai-auth-mode">
+              <option value="api_key">API Key</option>
+              <option value="oos">OOS (ChatGPT Web)</option>
+            </select>
+          </label>
+          <label id="ai-api-key-wrap">API Key<input id="ai-api-key" type="password" /></label>
+          <label id="ai-oos-token-wrap">OOS Access Token<input id="ai-oos-token" type="password" placeholder="chatgpt.com access token" /></label>
+          <label id="ai-oos-cookie-wrap">OOS Cookie<input id="ai-oos-cookie" type="text" placeholder="__Secure-next-auth.session-token=...; cf_clearance=..." /></label>
+          <label id="ai-oos-user-agent-wrap">OOS User-Agent<input id="ai-oos-user-agent" type="text" placeholder="Mozilla/5.0 ..." /></label>
+          <div id="ai-oos-verify-row" class="row">
+            <button id="ai-oos-verify-btn" type="button" class="secondary">校验 OOS 登录</button>
+            <button id="ai-oos-browser-login-btn" type="button" class="secondary">打开 ChatGPT 登录并回填</button>
+          </div>
+          <pre id="ai-oos-browser-status">未启动浏览器登录流程</pre>
+          <label>模型<input id="ai-model" type="text" placeholder="gpt-4o-mini" /></label>
+          <label>AI Global Test Instruction
+            <textarea id="ai-global-instruction" placeholder="长期生效的业务范围、测试策略、PRD约束、Bug标准"></textarea>
+          </label>
+          <div class="row">
+            <button type="submit" class="primary">保存设置</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="ai-chat" class="tab-panel">
+        <h2>AI 对话</h2>
+        <div class="card">
+          <div class="muted">你可以直接告诉 AI：修改哪些接口、补哪些用例、删除哪些错误用例。勾选自动应用后会直接写入平台数据。</div>
+          <div id="ai-chat-log" class="ai-chat-log"></div>
+          <label class="inline"><input id="ai-chat-auto-apply" type="checkbox" checked />自动应用 AI 修改到接口/用例</label>
+          <label>对 AI 说
+            <textarea id="ai-chat-input" placeholder="例如：把 create 接口的成功用例改成动态 referralCode，并新增一个 personalRebate+invitationRebate 超限的负例"></textarea>
+          </label>
+          <div class="row">
+            <button id="ai-chat-send-btn" type="button" class="primary">发送并执行</button>
+            <button id="ai-chat-clear-btn" type="button" class="secondary">清空对话</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="runs" class="tab-panel">
+        <h2>历史结果</h2>
+        <div class="split">
+          <div class="card">
+            <h3>执行记录</h3>
+            <div id="run-list" class="list"></div>
+          </div>
+          <div>
+            <div id="selected-run-meta" class="card muted"></div>
+            <div class="card">
+              <table>
+                <thead>
+                  <tr>
+                    <th>接口</th>
+                    <th>步骤/用例</th>
+                    <th>账号</th>
+                    <th>结果</th>
+                    <th>详情</th>
+                  </tr>
+                </thead>
+                <tbody id="selected-run-results"></tbody>
+              </table>
+            </div>
+            <div class="card">
+              <div class="row-between">
+                <h3>AI 报告</h3>
+                <button id="analyze-selected-run-btn" type="button" class="secondary">分析当前记录</button>
+              </div>
+              <pre id="selected-run-ai-report"></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

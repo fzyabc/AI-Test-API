@@ -302,7 +302,11 @@ function renderRunTable(tbodySelector, results) {
         <div class="retest-result-block" style="display:none">
           <div class="retest-result-head"></div>
           <details class="retest-response-detail">
-            <summary>查看响应详情</summary>
+            <summary>请求体</summary>
+            <pre class="retest-request-body"></pre>
+          </details>
+          <details class="retest-response-detail">
+            <summary>响应详情</summary>
             <pre class="retest-response-body"></pre>
           </details>
           <div class="retest-ai-reply muted" style="display:none"></div>
@@ -362,6 +366,14 @@ function renderRunTable(tbodySelector, results) {
           const pass = retestResult.pass;
           resultHead.className = `retest-result-head ${pass ? "status-pass" : "status-fail"}`;
           resultHead.textContent = `${pass ? "✓ 通过" : "✗ 失败"} — ${retestResult.assertionSummary || ""}`;
+
+          // 请求体
+          const reqBodyEl = panel.querySelector(".retest-request-body");
+          reqBodyEl.textContent = formatDisplayValue(
+            retestResult.request?.body,
+          );
+
+          // 响应体
           const respJson = retestResult.response?.bodyJson;
           const respText = retestResult.response?.bodyText;
           const respErr = retestResult.response?.transportError;
@@ -370,15 +382,17 @@ function renderRunTable(tbodySelector, results) {
             : respJson != null
               ? JSON.stringify(respJson, null, 2)
               : respText || "-";
+
           resultBlock.style.display = "";
           statusLine.textContent = pass
             ? "用例已更新并通过重测，可以 dismissed 对应 bug。"
             : "用例已更新但重测仍失败，请检查用例数据是否正确。";
 
-          // 在结果行追加重测标记
+          // 在结果行更新状态
           const tr = button.closest("tr");
           if (tr) {
-            const statusTd = tr.querySelectorAll("td")[3];
+            const tds = tr.querySelectorAll("td");
+            const statusTd = tds[3];
             if (statusTd) {
               const old = statusTd.querySelector(".retest-badge");
               if (old) old.remove();
@@ -386,6 +400,24 @@ function renderRunTable(tbodySelector, results) {
               badge.className = `retest-badge ${pass ? "status-pass" : "status-fail"}`;
               badge.textContent = `AI更新重测: ${pass ? "通过" : "失败"}`;
               statusTd.appendChild(badge);
+            }
+            // 如果通过，把原始失败结果行也改为通过样式
+            if (pass && statusTd) {
+              statusTd.className = "status-pass";
+              const orig = statusTd.querySelector(".retest-badge");
+              // 原始文字节点更新
+              statusTd.childNodes.forEach((node) => {
+                if (node.nodeType === Node.TEXT_NODE) node.textContent = "通过";
+              });
+              // 更新摘要列
+              const detailTd = tds[4];
+              if (detailTd) {
+                const summaryEl = detailTd.querySelector(
+                  ".result-summary-text",
+                );
+                if (summaryEl)
+                  summaryEl.textContent = `[AI重测] ${retestResult.assertionSummary || "全部断言通过"}`;
+              }
             }
           }
 
@@ -484,6 +516,11 @@ function renderRunTable(tbodySelector, results) {
           resultHead.className = `retest-result-head ${pass ? "status-pass" : "status-fail"}`;
           resultHead.textContent = `${pass ? "✓ 通过" : "✗ 失败"} — ${retestResult.assertionSummary || ""}`;
 
+          // 请求体
+          panel.querySelector(".retest-request-body").textContent =
+            formatDisplayValue(retestResult.request?.body);
+
+          // 响应体
           const respJson = retestResult.response?.bodyJson;
           const respText = retestResult.response?.bodyText;
           const respErr = retestResult.response?.transportError;

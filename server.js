@@ -130,9 +130,15 @@ function normalizeAiChatAction(action) {
   return {
     type,
     interfaceId: String(action.interfaceId || action.id || '').trim(),
+    interfaceName: String(action.interfaceName || '').trim(),
     caseId: String(action.caseId || '').trim(),
+    caseName: String(action.caseName || action.case_id || '').trim(),
     interface: action.interface && typeof action.interface === 'object' ? action.interface : null,
-    case: action.case && typeof action.case === 'object' ? action.case : null,
+    case: action.case && typeof action.case === 'object'
+      ? action.case
+      : action.casePatch && typeof action.casePatch === 'object'
+        ? action.casePatch
+        : null,
   };
 }
 
@@ -162,11 +168,41 @@ function findInterfaceIndex(payload, interfaceId) {
   return (payload.interfaces || []).findIndex((item) => item.id === interfaceId);
 }
 
+function normalizeTextForMatch(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '');
+}
+
+function findInterfaceIndexFlexible(payload, interfaceId, interfaceName) {
+  const interfaces = payload.interfaces || [];
+  const byId = findInterfaceIndex(payload, interfaceId);
+  if (byId !== -1) return byId;
+  const nameNorm = normalizeTextForMatch(interfaceName);
+  if (!nameNorm) return -1;
+  return interfaces.findIndex((item) => normalizeTextForMatch(item.name) === nameNorm);
+}
+
+function findCaseIndexFlexible(apiInterface, caseId, caseName) {
+  const cases = apiInterface.cases || [];
+  if (caseId) {
+    const byId = cases.findIndex((item) => item.id === caseId);
+    if (byId !== -1) return byId;
+  }
+  const nameNorm = normalizeTextForMatch(caseName);
+  if (!nameNorm) return -1;
+  const exact = cases.findIndex((item) => normalizeTextForMatch(item.name) === nameNorm);
+  if (exact !== -1) return exact;
+  return cases.findIndex((item) => normalizeTextForMatch(item.name).includes(nameNorm));
+}
+
 function applyAiChatActions(payload, actions) {
   const next = {
     interfaces: [...(payload.interfaces || [])],
   };
   const applied = [];
+  const skipped = [];
 
   for (const action of actions || []) {
     if (!action || !action.type) continue;
@@ -179,8 +215,11 @@ function applyAiChatActions(payload, actions) {
     }
 
     if (action.type === 'update_interface' && action.interface) {
-      const idx = findInterfaceIndex(next, action.interfaceId || action.interface.id);
-      if (idx === -1) continue;
+      const idx = findInterfaceIndexFlexible(next, action.interfaceId || action.interface.id, action.interfaceName);
+      if (idx === -1) {
+        skipped.push({ type: action.type, reason: 'interface not found', interfaceId: action.interfaceId, interfaceName: action.interfaceName });
+        continue;
+      }
       const current = next.interfaces[idx];
       const merged = normalizeInterface(
         {
@@ -202,16 +241,22 @@ function applyAiChatActions(payload, actions) {
     }
 
     if (action.type === 'delete_interface') {
-      const idx = findInterfaceIndex(next, action.interfaceId);
-      if (idx === -1) continue;
+      const idx = findInterfaceIndexFlexible(next, action.interfaceId, action.interfaceName);
+      if (idx === -1) {
+        skipped.push({ type: action.type, reason: 'interface not found', interfaceId: action.interfaceId, interfaceName: action.interfaceName });
+        continue;
+      }
       const [removed] = next.interfaces.splice(idx, 1);
       applied.push({ type: action.type, interfaceId: removed.id });
       continue;
     }
 
     if (action.type === 'create_case' && action.case) {
-      const idx = findInterfaceIndex(next, action.interfaceId);
-      if (idx === -1) continue;
+      const idx = findInterfaceIndexFlexible(next, action.interfaceId, action.interfaceName);
+      if (idx === -1) {
+        skipped.push({ type: action.type, reason: 'interface not found', interfaceId: action.interfaceId, interfaceName: action.interfaceName });
+        continue;
+      }
       const apiInterface = next.interfaces[idx];
       const createdCase = normalizeCase(action.case, apiInterface);
       next.interfaces[idx] = {
@@ -223,11 +268,23 @@ function applyAiChatActions(payload, actions) {
     }
 
     if (action.type === 'update_case' && action.case) {
-      const idx = findInterfaceIndex(next, action.interfaceId);
-      if (idx === -1) continue;
+      const idx = findInterfaceIndexFlexible(next, action.interfaceId, action.interfaceName);
+      if (idx === -1) {
+        skipped.push({ type: action.type, reason: 'interface not found', interfaceId: action.interfaceId, interfaceName: action.interfaceName });
+        continue;
+      }
       const apiInterface = next.interfaces[idx];
-      const caseIdx = (apiInterface.cases || []).findIndex((item) => item.id === action.caseId);
-      if (caseIdx === -1) continue;
+      const caseIdx = findCaseIndexFlexible(apiInterface, action.caseId, action.caseName || action.case?.name);
+      if (caseIdx === -1) {
+        skipped.push({
+          type: action.type,
+          reason: 'case not found',
+          interfaceId: apiInterface.id,
+          caseId: action.caseId,
+          caseName: action.caseName || action.case?.name || '',
+        });
+        continue;
+      }
       const currentCase = apiInterface.cases[caseIdx];
       const nextCase = {
         ...normalizeCase({ ...currentCase, ...action.case }, apiInterface),
@@ -241,14 +298,26 @@ function applyAiChatActions(payload, actions) {
     }
 
     if (action.type === 'delete_case') {
-      const idx = findInterfaceIndex(next, action.interfaceId);
-      if (idx === -1) continue;
+      const idx = findInterfaceIndexFlexible(next, action.interfaceId, action.interfaceName);
+      if (idx === -1) {
+        skipped.push({ type: action.type, reason: 'interface not found', interfaceId: action.interfaceId, interfaceName: action.interfaceName });
+        continue;
+      }
       const apiInterface = next.interfaces[idx];
       const existingCases = apiInterface.cases || [];
-      const caseIdx = existingCases.findIndex((item) => item.id === action.caseId);
-      if (caseIdx === -1) continue;
+      const caseIdx = findCaseIndexFlexible(apiInterface, action.caseId, action.caseName);
+      if (caseIdx === -1) {
+        skipped.push({
+          type: action.type,
+          reason: 'case not found',
+          interfaceId: apiInterface.id,
+          caseId: action.caseId,
+          caseName: action.caseName || '',
+        });
+        continue;
+      }
       const removedCase = existingCases[caseIdx];
-      const cases = existingCases.filter((item) => item.id !== action.caseId);
+      const cases = existingCases.filter((item) => item.id !== removedCase.id);
       next.interfaces[idx] = { ...apiInterface, cases };
       applied.push({ type: action.type, interfaceId: apiInterface.id, caseId: removedCase.id });
     }
@@ -257,6 +326,7 @@ function applyAiChatActions(payload, actions) {
   return {
     payload: next,
     applied,
+    skipped,
     updated: applied.length > 0,
   };
 }
@@ -412,11 +482,19 @@ app.post('/api/ai/chat', asyncHandler(async (req, res) => {
     name: item.name,
     method: item.method,
     path: item.path,
+    description: item.description || '',
+    bodyTemplate: item.bodyTemplate || '',
+    headers: item.headers || {},
     caseCount: Array.isArray(item.cases) ? item.cases.length : 0,
-    cases: (item.cases || []).slice(0, 12).map((testCase) => ({
+    cases: (item.cases || []).map((testCase) => ({
       id: testCase.id,
       name: testCase.name,
       description: testCase.description,
+      authProfileId: testCase.authProfileId || '',
+      pathParams: testCase.pathParams || {},
+      headers: testCase.headers || {},
+      body: testCase.body || '',
+      expected: testCase.expected || {},
     })),
   }));
   const docsSummary = (docContexts.docs || []).slice(0, 4).map((doc) => ({
@@ -443,17 +521,19 @@ app.post('/api/ai/chat', asyncHandler(async (req, res) => {
     '  "notes": ["string"],',
     '  "actions": [',
     '    { "type": "create_interface", "interface": { ... } },',
-    '    { "type": "update_interface", "interfaceId": "id", "interface": { ... } },',
-    '    { "type": "delete_interface", "interfaceId": "id" },',
+    '    { "type": "update_interface", "interfaceId": "id", "interfaceName": "optional", "interface": { ... } },',
+    '    { "type": "delete_interface", "interfaceId": "id", "interfaceName": "optional" },',
     '    { "type": "create_case", "interfaceId": "id", "case": { ... } },',
-    '    { "type": "update_case", "interfaceId": "id", "caseId": "id", "case": { ... } },',
-    '    { "type": "delete_case", "interfaceId": "id", "caseId": "id" }',
+    '    { "type": "update_case", "interfaceId": "id", "interfaceName": "optional", "caseId": "id", "caseName": "optional", "case": { ... } },',
+    '    { "type": "delete_case", "interfaceId": "id", "interfaceName": "optional", "caseId": "id", "caseName": "optional" }',
     '  ]',
     '}',
     'Rules:',
     '- Do not output markdown.',
     '- If user asks to modify cases, prefer returning actions.',
     '- Keep ids stable unless creating new objects.',
+    '- If caseId is unknown, you may use caseName + interfaceId/interfaceName to target the case.',
+    '- For request data change, update case.body directly and keep other fields unchanged unless user asks.',
     '- Focus on business logic driven testing, not rigid status/message assertions.',
     '',
     `User message: ${message}`,
@@ -490,10 +570,12 @@ app.post('/api/ai/chat', asyncHandler(async (req, res) => {
   }
 
   let applied = [];
+  let skipped = [];
   let updated = false;
   if (autoApply && parsed.actions.length) {
     const appliedResult = applyAiChatActions(interfacesPayload, parsed.actions);
     applied = appliedResult.applied;
+    skipped = appliedResult.skipped || [];
     updated = appliedResult.updated;
     if (updated) {
       await saveInterfaces(appliedResult.payload);
@@ -505,6 +587,7 @@ app.post('/api/ai/chat', asyncHandler(async (req, res) => {
     notes: parsed.notes,
     actions: parsed.actions,
     applied,
+    skipped,
     appliedCount: applied.length,
     updated,
     aiMeta: aiResult.meta,

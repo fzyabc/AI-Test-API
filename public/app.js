@@ -353,6 +353,20 @@ function renderRunTable(tbodySelector, results) {
           return;
         }
 
+        // 重测完成后在结果行的状态列追加标记
+        const tr = button.closest("tr");
+        if (tr) {
+          const statusTd = tr.querySelectorAll("td")[3];
+          if (statusTd) {
+            const old = statusTd.querySelector(".retest-badge");
+            if (old) old.remove();
+            const badge = document.createElement("div");
+            badge.className = `retest-badge ${retestResult.pass ? "status-pass" : "status-fail"}`;
+            badge.textContent = `重测: ${retestResult.pass ? "通过" : "失败"}`;
+            statusTd.appendChild(badge);
+          }
+        }
+
         // 无论有没有填原因，把重测结果发给 AI 分析
         const activeRunId = state.dashboardRunId || state.selectedRunId;
         if (!activeRunId) return;
@@ -371,8 +385,19 @@ function renderRunTable(tbodySelector, results) {
               retestResult.response?.transportError ||
               "";
 
+        // 找对应 bug，把 bugId 带给 AI，让 AI 精准更新而不只是"建议"
+        const matchingBug = state.bugs.find(
+          (b) =>
+            b.caseName === caseName &&
+            (b.status === "open" || b.status === "confirmed"),
+        );
+        const bugIdLine = matchingBug
+          ? `对应 bugId：${matchingBug.id}（${matchingBug.title}）`
+          : "";
+
         const chatContent = [
           `[重测] 接口：${interfaceName}，用例：${caseName}`,
+          bugIdLine,
           reason ? `重测原因：${reason}` : "（无原因说明，用户手动触发重测）",
           `重测结果：${pass ? "通过" : "失败"} — ${respSummary}`,
           !pass && respBody ? `响应内容：\n${respBody.slice(0, 800)}` : "",

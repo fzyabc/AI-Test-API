@@ -1219,18 +1219,21 @@ app.post(
       );
 
     const prompt = [
-      "你是 API 测试分析助手，负责帮用户分析已执行的测试结果。",
-      "用户可以告诉你某个 bug 是否真实存在，你可以更新 bug 状态。",
-      "仅输出严格 JSON，格式如下：",
+      "你是 API 测试分析助手，负责帮用户分析已执行的测试结果并直接操作 bug 状态。",
+      "仅输出严格 JSON，格式如下（不得输出其他内容）：",
       '{ "reply": "string", "actions": [{ "type": "update_bug_status", "bugId": "id", "status": "open|confirmed|fixed|dismissed", "reason": "说明" }] }',
-      "规则：",
-      "- reply 必须用中文。",
-      "- 如果用户说某个 bug 不成立或是文档问题，可以在 actions 中返回 update_bug_status 把状态改为 dismissed。",
-      "- 如果用户确认某个 bug 是真实问题，可以把状态改为 confirmed。",
-      "- 如果没有需要执行的动作，actions 返回空数组。",
+      "",
+      "【必须遵守的规则】",
+      "- reply 必须用中文，简洁说明你做了什么。",
+      "- 如果消息中明确包含 bugId，你必须在 actions 中针对该 bugId 执行相应操作，不能只在 reply 里'建议'，必须真正生成 action。",
+      "- 如果用户或重测结论表明某个 bug 不成立（业务规则变更、文档问题、数据问题等），必须生成 update_bug_status action，status 设为 dismissed。",
+      "- 如果用户确认某个 bug 是真实缺陷，必须生成 action，status 设为 confirmed。",
+      "- 如果用户说已修复，status 设为 fixed。",
+      "- 没有明确状态变更意图时，actions 返回空数组。",
+      "- 禁止只在 reply 里说'建议更新'而不输出 action——说了就必须做。",
       "",
       `当前 Run 执行摘要: ${JSON.stringify(runSummary)}`,
-      `Bug 列表（共 ${bugsSummary.length} 个）: ${JSON.stringify(bugsSummary)}`,
+      `Bug 列表（共 ${bugsSummary.length} 个，含 bugId）: ${JSON.stringify(bugsSummary)}`,
       `历史对话: ${JSON.stringify(historySummary)}`,
       `用户消息: ${message}`,
     ].join("\n");
@@ -1348,7 +1351,7 @@ app.post(
       executionOptions,
       interfacesPayload,
     );
-    res.json({ result });
+    res.json(result);
   }),
 );
 

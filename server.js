@@ -982,31 +982,37 @@ app.post(
     runsPayload.runs.unshift(run);
     await saveRuns(runsPayload);
 
-    // 自动提取 AI 判定的 bugs 并保存
+    // 自动提取 AI 判定的 bugs 并保存（每条 evidence result 单独建一条 bug）
     if (aiAgentRun.bugs && aiAgentRun.bugs.length) {
       const bugsPayload = await getBugs();
       const now = new Date().toISOString();
       for (const bug of aiAgentRun.bugs) {
-        const evidence = results.find((r) =>
+        const evidenceResults = results.filter((r) =>
           (bug.evidenceResultIds || []).includes(r.id),
         );
-        bugsPayload.bugs.push({
-          id: crypto.randomUUID(),
-          runId: run.id,
-          title: bug.title || "",
-          severity: bug.severity || "medium",
-          description: bug.description || "",
-          status: "open",
-          interfaceName: evidence?.interfaceName || "",
-          caseName: evidence?.caseName || "",
-          method: evidence?.method || "",
-          url: evidence?.url || "",
-          request: evidence?.request || {},
-          response: evidence?.response || {},
-          evidenceResultIds: bug.evidenceResultIds || [],
-          createdAt: now,
-          updatedAt: now,
-        });
+        const toProcess = evidenceResults.length > 0 ? evidenceResults : [null];
+        for (const evidence of toProcess) {
+          bugsPayload.bugs.push({
+            id: crypto.randomUUID(),
+            runId: run.id,
+            title: bug.title || "",
+            severity: bug.severity || "medium",
+            description: bug.description || "",
+            status: "open",
+            interfaceName: evidence?.interfaceName || "",
+            caseName: evidence?.caseName || "",
+            method: evidence?.method || "",
+            path: evidence?.path || "",
+            url: evidence?.url || "",
+            request: evidence?.request || {},
+            response: evidence?.response || {},
+            evidenceResultIds: evidence
+              ? [evidence.id]
+              : bug.evidenceResultIds || [],
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
       }
       await saveBugs(bugsPayload);
     }

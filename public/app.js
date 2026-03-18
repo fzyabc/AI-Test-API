@@ -257,7 +257,7 @@ function buildResultDetailsHtml(item) {
         <pre>${escapeHtml(buildRetryText(item.retry))}</pre>
       </div>
     </details>
-    ${item.interfaceId && item.caseId ? `<div class="result-retest-row"><button type="button" class="secondary subtle-btn" data-retest-interface="${escapeHtml(item.interfaceId)}" data-retest-case="${escapeHtml(item.caseId)}">重测此用例 ▾</button></div>` : ""}
+    ${item.interfaceId && item.caseId ? `<div class="result-retest-row"><button type="button" class="secondary subtle-btn" data-retest-interface="${escapeHtml(item.interfaceId)}" data-retest-case="${escapeHtml(item.caseId)}" data-retest-case-name="${escapeHtml(item.caseName || "")}" data-retest-interface-name="${escapeHtml(item.interfaceName || "")}">重测此用例 ▾</button></div>` : ""}
   `;
 }
 
@@ -292,53 +292,135 @@ function renderRunTable(tbodySelector, results) {
       const panel = document.createElement("div");
       panel.className = "retest-panel";
       panel.innerHTML = `
-        <div class="retest-hint">可以告诉 AI 重测原因，AI 会在对话里记录，也可以直接跳过</div>
-        <textarea class="retest-reason" placeholder="重测原因（可选）：例如：这个失败是因为数据前置问题，重测时换一组数据" rows="2"></textarea>
+        <div class="retest-hint">可以填写重测原因，AI 会分析重测结果并在对话面板回复（也可以直接跳过）</div>
+        <textarea class="retest-reason" placeholder="重测原因（可选）：例如：这个失败可能是数据前置问题，不是真实 Bug" rows="2"></textarea>
         <div class="row">
           <button type="button" class="primary subtle-btn retest-confirm">确认重测</button>
-          <span class="retest-result-text"></span>
+        </div>
+        <div class="retest-result-block" style="display:none">
+          <div class="retest-result-head"></div>
+          <details class="retest-response-detail">
+            <summary>查看响应详情</summary>
+            <pre class="retest-response-body"></pre>
+          </details>
+          <div class="retest-ai-reply muted" style="display:none"></div>
         </div>
       `;
       row.appendChild(panel);
 
       panel.querySelector(".retest-confirm").onclick = async () => {
         const confirmBtn = panel.querySelector(".retest-confirm");
-        const resultSpan = panel.querySelector(".retest-result-text");
         const reason = panel.querySelector(".retest-reason").value.trim();
+        const resultBlock = panel.querySelector(".retest-result-block");
+        const resultHead = panel.querySelector(".retest-result-head");
+        const responseBody = panel.querySelector(".retest-response-body");
+        const aiReplyDiv = panel.querySelector(".retest-ai-reply");
+
         confirmBtn.disabled = true;
         confirmBtn.textContent = "重测中...";
-        resultSpan.textContent = "";
-        resultSpan.className = "retest-result-text";
+        resultBlock.style.display = "none";
+        aiReplyDiv.style.display = "none";
+
+        let retestResult = null;
         try {
-          const result = await apiFetch(
+          retestResult = await apiFetch(
             `/api/interfaces/${button.dataset.retestInterface}/cases/${button.dataset.retestCase}/run`,
-            { method: "POST", body: JSON.stringify({ reason }) },
+            { method: "POST", body: JSON.stringify({}) },
           );
-          const pass = result.pass;
-          resultSpan.className = `retest-result-text ${pass ? "status-pass" : "status-fail"}`;
-          resultSpan.textContent = `${pass ? "✓ 通过" : "✗ 失败"} — ${result.assertionSummary || ""}`;
+          const pass = retestResult.pass;
+          resultHead.className = `retest-result-head ${pass ? "status-pass" : "status-fail"}`;
+          resultHead.textContent = `${pass ? "✓ 通过" : "✗ 失败"} — ${retestResult.assertionSummary || ""}`;
+
+          const respJson = retestResult.response?.bodyJson;
+          const respText = retestResult.response?.bodyText;
+          const respErr = retestResult.response?.transportError;
+          responseBody.textContent = respErr
+            ? `网络错误: ${respErr}`
+            : respJson != null
+              ? JSON.stringify(respJson, null, 2)
+              : respText || "-";
+
+          resultBlock.style.display = "";
           confirmBtn.textContent = "再次重测";
           confirmBtn.disabled = false;
-
-          if (reason) {
-            const activeRunId = state.dashboardRunId || state.selectedRunId;
-            if (activeRunId) {
-              if (!state.runChatMessages[activeRunId])
-                state.runChatMessages[activeRunId] = [];
-              state.runChatMessages[activeRunId].push({
-                role: "user",
-                content: `[重测] ${button.dataset.retestCase} 重测原因：${reason}\n重测结果：${pass ? "通过" : "失败"} — ${result.assertionSummary || ""}`,
-                time: new Date().toISOString(),
-              });
-              renderRunChatLog("dashboard-run-chat-log", activeRunId);
-              renderRunChatLog("selected-run-chat-log", activeRunId);
-            }
-          }
         } catch (error) {
-          resultSpan.className = "retest-result-text status-fail";
-          resultSpan.textContent = `重测失败: ${error.message}`;
+          resultHead.className = "retest-result-head status-fail";
+          resultHead.textContent = `重测请求失败: ${error.message}`;
+          responseBody.textContent = "";
+          resultBlock.style.display = "";
           confirmBtn.textContent = "确认重测";
           confirmBtn.disabled = false;
+          return;
+        }
+
+        // 无论有没有填原因，把重测结果发给 AI 分析
+        const activeRunId = state.dashboardRunId || state.selectedRunId;
+        if (!activeRunId) return;
+        if (!state.runChatMessages[activeRunId])
+          state.runChatMessages[activeRunId] = [];
+
+        const caseName =
+          button.dataset.retestCaseName || button.dataset.retestCase;
+        const interfaceName = button.dataset.retestInterfaceName || "";
+        const pass = retestResult.pass;
+        const respSummary = retestResult.assertionSummary || "";
+        const respBody =
+          retestResult.response?.bodyJson != null
+            ? JSON.stringify(retestResult.response.bodyJson, null, 2)
+            : retestResult.response?.bodyText ||
+              retestResult.response?.transportError ||
+              "";
+
+        const chatContent = [
+          `[重测] 接口：${interfaceName}，用例：${caseName}`,
+          reason ? `重测原因：${reason}` : "（无原因说明，用户手动触发重测）",
+          `重测结果：${pass ? "通过" : "失败"} — ${respSummary}`,
+          !pass && respBody ? `响应内容：\n${respBody.slice(0, 800)}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        state.runChatMessages[activeRunId].push({
+          role: "user",
+          content: chatContent,
+          time: new Date().toISOString(),
+        });
+        renderRunChatLog("dashboard-run-chat-log", activeRunId);
+        renderRunChatLog("selected-run-chat-log", activeRunId);
+
+        aiReplyDiv.style.display = "";
+        aiReplyDiv.textContent = "AI 分析中...";
+
+        try {
+          const history = state.runChatMessages[activeRunId]
+            .slice(-10)
+            .map((m) => ({ role: m.role, content: m.content }));
+          const chatResult = await apiFetch("/api/ai/run-chat", {
+            method: "POST",
+            body: JSON.stringify({
+              runId: activeRunId,
+              message: chatContent,
+              history,
+            }),
+          });
+          const reply = chatResult.reply || "AI 暂无回复";
+          state.runChatMessages[activeRunId].push({
+            role: "assistant",
+            content: reply,
+            time: new Date().toISOString(),
+          });
+          renderRunChatLog("dashboard-run-chat-log", activeRunId);
+          renderRunChatLog("selected-run-chat-log", activeRunId);
+          aiReplyDiv.textContent = `AI：${reply}`;
+          aiReplyDiv.className = "retest-ai-reply";
+
+          if (chatResult.appliedCount > 0) {
+            await loadBugsOnly();
+            renderBugList();
+          }
+        } catch {
+          aiReplyDiv.textContent = "AI 分析失败，请在对话面板手动提问";
+          aiReplyDiv.className = "retest-ai-reply muted";
         }
       };
     };
@@ -529,7 +611,7 @@ function renderBugList() {
         <button type="button" class="danger subtle-btn" data-delete-bug="${escapeHtml(bug.id)}">删除</button>
       </div>
       <div class="bug-location">
-        <span class="bug-interface-tag">${escapeHtml(bug.method || "")} ${escapeHtml(bug.interfaceName || "未知接口")}</span>
+        <span class="bug-interface-tag">${escapeHtml(bug.method || "")} ${escapeHtml(bug.path || bug.url || bug.interfaceName || "未知接口")}</span>
         ${bug.caseName ? `<span class="bug-case-tag">${escapeHtml(bug.caseName)}</span>` : ""}
       </div>
       <div class="bug-description">${escapeHtml(bug.description || "")}</div>

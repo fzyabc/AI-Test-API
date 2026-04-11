@@ -19,7 +19,7 @@ const {
 const { analyzeRunWithAi } = require("./lib/ai");
 const { importApiDocument } = require("./lib/doc-import");
 const { runAllWithAiAgent } = require("./lib/ai-agent-runner");
-const { runCase } = require("./lib/runner");
+const { runAll, runCase } = require("./lib/runner");
 const {
   verifyOosLogin,
   callAiText,
@@ -891,7 +891,7 @@ app.post(
     const settings = await getSettings();
     const interfacesPayload = await getInterfaces();
     const docContexts = await getDocContexts();
-    const executionMode = "ai_agent";
+    const executionMode = normalizeExecutionMode(settings.executionMode);
     const overrideProfile =
       requestedAuthProfileId && !forceNoAuth
         ? settings.authProfiles.find(
@@ -907,19 +907,34 @@ app.post(
     const startedAt = new Date().toISOString();
     let results = [];
     let summary = { total: 0, passed: 0, failed: 0 };
-    const aiAgentRun = await runAllWithAiAgent(
-      settings,
-      interfacesPayload,
-      docContexts,
-      {
+    let aiAgentRun = null;
+
+    if (executionMode === "ai_agent") {
+      aiAgentRun = await runAllWithAiAgent(
+        settings,
+        interfacesPayload,
+        docContexts,
+        {
+          overrideAuthProfileId: overrideProfile?.id || "",
+          forceNoAuth,
+        },
+        runInstruction,
+        runContext,
+      );
+      results = aiAgentRun.results;
+      summary = aiAgentRun.summary;
+    } else {
+      results = await runAll(settings, interfacesPayload, {
         overrideAuthProfileId: overrideProfile?.id || "",
         forceNoAuth,
-      },
-      runInstruction,
-      runContext,
-    );
-    results = aiAgentRun.results;
-    summary = aiAgentRun.summary;
+      });
+      summary = {
+        total: results.length,
+        passed: results.filter((item) => item.pass).length,
+        failed: results.filter((item) => !item.pass).length,
+      };
+    }
+
     const finishedAt = new Date().toISOString();
 
     const run = {
@@ -983,7 +998,7 @@ app.post(
     await saveRuns(runsPayload);
 
     // 自动提取 AI 判定的 bugs 并保存（每条 evidence result 单独建一条 bug）
-    if (aiAgentRun.bugs && aiAgentRun.bugs.length) {
+    if (aiAgentRun?.bugs && aiAgentRun.bugs.length) {
       const bugsPayload = await getBugs();
       const now = new Date().toISOString();
       for (const bug of aiAgentRun.bugs) {

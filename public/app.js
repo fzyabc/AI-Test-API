@@ -1966,9 +1966,7 @@ async function saveCase(event) {
     headers: safeJsonParse($("#case-headers").value, {}),
     body: $("#case-body").value,
     expected: {
-      businessCode: $("#expected-business-code").value
-        ? Number($("#expected-business-code").value)
-        : null,
+      businessCode: $("#expected-business-code").value.trim() || null,
       messageIncludes: $("#expected-message").value.trim(),
     },
   };

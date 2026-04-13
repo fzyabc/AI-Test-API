@@ -63,6 +63,8 @@ const {
   validateScenarioInput,
 } = require("../lib/validators");
 
+const { extractBusinessCode, businessCodeEquals } = require("../lib/business-code");
+
 const validBugStatuses = ["open", "confirmed", "fixed", "dismissed"];
 
 function normalizeSettingsResponse(settings) {
@@ -889,8 +891,8 @@ function registerApiRoutes(app) {
           continue;
         }
 
-        const actualCode = responseBody.code;
-        if (actualCode === undefined || actualCode === null) {
+        const actualCode = extractBusinessCode(responseBody);
+        if (actualCode === null) {
           skippedCount += 1;
           continue;
         }
@@ -914,12 +916,11 @@ function registerApiRoutes(app) {
         }
 
         const expectedCode = testCase.expected?.businessCode;
-        const targetCode = Number(actualCode);
-        if (Number.isFinite(targetCode) && expectedCode !== targetCode) {
+        if (!businessCodeEquals(actualCode, expectedCode)) {
           if (!testCase.expected) {
             testCase.expected = {};
           }
-          testCase.expected.businessCode = targetCode;
+          testCase.expected.businessCode = actualCode;
           filledCount += 1;
         } else {
           skippedCount += 1;

@@ -1,16 +1,78 @@
-# JSONPlaceholder 测试接口文档
+# JSONPlaceholder 测试接口文档（实测修正版）
 
 ## 概述
 
 - **BASE_URL**: `https://jsonplaceholder.typicode.com`
-- **无需认证**：所有接口都是公开的，不需要 token / API key
-- **用途**：用于验证 AI-Test-API 平台的场景编排、变量提取、断言等能力
+- **无需认证**：所有接口公开可访问，不需要 token / API key
+- **适用目的**：用于验证 AI-Test-API 的接口请求、断言、场景编排、变量提取、历史记录等能力
 
-> ⚠️ 注意：POST / PUT / PATCH / DELETE 操作不真正修改数据，只返回模拟响应。
+> ⚠️ 重要说明：
+>
+> JSONPlaceholder 的 `POST / PUT / PATCH / DELETE` **是模拟写入**。
+> - 会返回看起来成功的响应
+> - **但不会真正持久化到后端数据集**
+> - 所以你不能假设 `POST /posts` 返回了 `id=101` 之后，再 `GET /posts/101` 就一定能查到
+>
+> 实测结果：`GET /posts/101` 返回 `404 {}`。
 
 ---
 
-## 1. 查询文章列表
+## 一、实测接口清单
+
+下面所有响应结论，都基于实际请求验证。
+
+---
+
+## 1）查询单篇文章
+
+```http
+GET /posts/1
+```
+
+### 实测响应
+- HTTP：`200`
+- Body：
+
+```json
+{
+  "userId": 1,
+  "id": 1,
+  "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+  "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
+}
+```
+
+### 建议断言
+- `$.id == 1`
+- `$.userId == 1`
+- `$.title` 存在
+- `$.body` 存在
+
+---
+
+## 2）查询不存在的文章
+
+```http
+GET /posts/99999
+```
+
+### 实测响应
+- HTTP：`404`
+- Body：
+
+```json
+{}
+```
+
+### 重点
+这个接口很适合用来测：
+- 异常处理
+- 404 响应
+- stopOnFailure
+
+---
+
+## 3）查询文章列表
 
 ```http
 GET /posts
@@ -18,48 +80,12 @@ GET /posts?userId=1
 GET /posts?userId=1&_limit=3
 ```
 
-### 返回结构
+### 实测结论
+- `GET /posts` 返回文章数组
+- `GET /posts?userId=1` 会过滤到指定用户
+- `GET /posts?userId=1&_limit=3` 返回 3 条
 
-```json
-[
-  {
-    "userId": 1,
-    "id": 1,
-    "title": "文章标题",
-    "body": "文章内容"
-  }
-]
-```
-
-### 重点看
-
-- 分页 / 过滤参数 `_limit` 是否生效
-- 返回条数是否正确
-- 字段结构是否稳定
-
----
-
-## 2. 查询单篇文章
-
-```http
-GET /posts/1
-GET /posts/99999
-```
-
-### 重点看
-
-- `/posts/1` 正常返回
-- `/posts/99999` 返回 404（用来测异常断言）
-
----
-
-## 3. 查询某用户的文章
-
-```http
-GET /users/1/posts
-```
-
-### 返回结构
+### 返回结构示例
 
 ```json
 [
@@ -72,47 +98,30 @@ GET /users/1/posts
 ]
 ```
 
-### 重点看
-
-- 返回的文章 `userId` 是否都是 `1`
-
----
-
-## 4. 查询评论
-
-```http
-GET /posts/1/comments
-GET /comments?postId=1
-```
-
-### 返回结构
-
-```json
-[
-  {
-    "postId": 1,
-    "id": 1,
-    "name": "评论者",
-    "email": "test@example.com",
-    "body": "评论内容"
-  }
-]
-```
-
-### 重点看
-
-- 评论是否属于对应文章
-- `email` 格式是否正确
+### 建议断言
+- 数组存在
+- `length > 0`
+- 过滤场景下每条记录的 `userId == 1`
 
 ---
 
-## 5. 查询用户信息
+## 4）查询用户信息
 
 ```http
 GET /users/1
 ```
 
-### 返回结构
+### 实测响应
+- HTTP：`200`
+- 返回完整嵌套对象，包含：
+  - `id`
+  - `name`
+  - `username`
+  - `email`
+  - `address.geo.lat`
+  - `company.name`
+
+### 响应示例
 
 ```json
 {
@@ -140,14 +149,66 @@ GET /users/1
 }
 ```
 
-### 重点看
-
-- 嵌套结构是否都能正常解析
-- 地址 / 公司信息是嵌套对象
+### 建议断言
+- `$.id == 1`
+- `$.email` 包含 `@`
+- `$.address.geo.lat` 存在
+- `$.company.name` 存在
 
 ---
 
-## 6. 创建文章 (POST)
+## 5）查询某用户的文章
+
+```http
+GET /users/1/posts
+```
+
+### 实测响应
+- HTTP：`200`
+- 返回数组
+- 数组内文章的 `userId` 都是 `1`
+
+### 建议断言
+- `length > 0`
+- 第一项 `$.userId == 1`
+
+---
+
+## 6）查询某文章的评论
+
+```http
+GET /posts/1/comments
+GET /posts/1/comments?_limit=2
+GET /comments?postId=1
+```
+
+### 实测响应
+- HTTP：`200`
+- 返回评论数组
+- `_limit=2` 时返回 2 条
+
+### 返回结构示例
+
+```json
+[
+  {
+    "postId": 1,
+    "id": 1,
+    "name": "id labore ex et quam laborum",
+    "email": "Eliseo@gardner.biz",
+    "body": "laudantium enim quasi est quidem magnam voluptate ipsam eos..."
+  }
+]
+```
+
+### 建议断言
+- `length > 0`
+- 第一项 `$.postId == 1`
+- `$.email` 包含 `@`
+
+---
+
+## 7）创建文章（模拟写入）
 
 ```http
 POST /posts
@@ -164,7 +225,9 @@ Content-Type: application/json
 }
 ```
 
-### 返回结构
+### 实测响应
+- HTTP：`201`
+- Body：
 
 ```json
 {
@@ -175,15 +238,28 @@ Content-Type: application/json
 }
 ```
 
-### 重点看
+### 重点说明
+- 返回 `id = 101`
+- **这个 101 只是模拟响应，不代表真实创建成功并可回查**
+- 实测：
 
-- **返回的 `id` 是 101**（这个接口不真正写入数据库，只是返回模拟 id）
-- 请求体字段原样返回
-- 这用来测变量提取：提取 `$.id` 供后续步骤使用
+```http
+GET /posts/101
+```
+
+返回：
+- HTTP：`404`
+- Body：`{}`
+
+### 建议断言
+- HTTP 201
+- `$.id == 101`
+- `$.title == "测试文章"`
+- `$.userId == 1`
 
 ---
 
-## 7. 创建评论 (POST)
+## 8）创建评论（模拟写入）
 
 ```http
 POST /comments
@@ -201,14 +277,28 @@ Content-Type: application/json
 }
 ```
 
-### 重点看
+### 实测响应
+- HTTP：`201`
+- Body：
 
-- 返回的 `id` 是 501
-- `postId` 是否和请求一致
+```json
+{
+  "postId": 1,
+  "name": "傻强",
+  "email": "shaqiang@test.com",
+  "body": "测试评论",
+  "id": 501
+}
+```
+
+### 建议断言
+- `$.id == 501`
+- `$.postId == 1`
+- `$.email == "shaqiang@test.com"`
 
 ---
 
-## 8. 创建用户 (POST)
+## 9）创建用户（模拟写入）
 
 ```http
 POST /users
@@ -225,13 +315,26 @@ Content-Type: application/json
 }
 ```
 
-### 重点看
+### 实测响应
+- HTTP：`201`
+- Body：
 
-- 返回的 `id` 是 11
+```json
+{
+  "name": "测试用户",
+  "username": "testuser",
+  "email": "test@example.com",
+  "id": 11
+}
+```
+
+### 建议断言
+- `$.id == 11`
+- `$.username == "testuser"`
 
 ---
 
-## 9. 更新文章 (PUT)
+## 10）全量更新文章（模拟写入）
 
 ```http
 PUT /posts/1
@@ -242,20 +345,34 @@ Content-Type: application/json
 
 ```json
 {
+  "id": 1,
   "title": "更新后的标题",
   "body": "更新后的内容",
   "userId": 1
 }
 ```
 
-### 重点看
+### 实测响应
+- HTTP：`200`
+- Body：
 
-- 返回完整对象
-- `id` 仍是 1
+```json
+{
+  "id": 1,
+  "title": "更新后的标题",
+  "body": "更新后的内容",
+  "userId": 1
+}
+```
+
+### 建议断言
+- `$.id == 1`
+- `$.title == "更新后的标题"`
+- `$.body == "更新后的内容"`
 
 ---
 
-## 10. 部分更新文章 (PATCH)
+## 11）部分更新文章（模拟写入）
 
 ```http
 PATCH /posts/1
@@ -270,180 +387,259 @@ Content-Type: application/json
 }
 ```
 
-### 重点看
+### 实测响应
+- HTTP：`200`
+- Body：
 
-- 只传了 `title`
-- 其他字段也在返回中（模拟全量返回）
+```json
+{
+  "userId": 1,
+  "id": 1,
+  "title": "只改标题",
+  "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
+}
+```
+
+### 重点说明
+- 不是只返回你传的字段
+- 会返回完整对象
+- `title` 被更新成新值
+- 其他字段沿用原有模拟内容
+
+### 建议断言
+- `$.id == 1`
+- `$.title == "只改标题"`
+- `$.body` 存在
 
 ---
 
-## 11. 删除文章 (DELETE)
+## 12）删除文章（模拟删除）
 
 ```http
 DELETE /posts/1
 ```
 
-### 重点看
+### 实测响应
+- HTTP：`200`
+- Body：
 
-- 返回空对象 `{}`
-- HTTP 状态码 200
+```json
+{}
+```
 
----
-
-# 测试场景建议
-
-## 场景一：基础查询
-
-| 步骤 | 接口 | 说明 |
-|------|------|------|
-| 1 | `GET /users/1` | 验证基本请求和响应解析 |
-
-**检查点**：
-- 响应状态码 200
-- 返回数据包含 `id`, `name`, `email`
-- `address.geo.lat` 嵌套字段存在
+### 建议断言
+- HTTP 200
+- 返回 `{}`
 
 ---
 
-## 场景二：创建 → 提取变量 → 查询
+## 二、修正后的推荐测试场景
 
-| 步骤 | 接口 | 说明 |
-|------|------|------|
-| 1 | `POST /posts` | 创建文章 |
-| 2 | `GET /posts/{{newPostId}}` | 查询刚创建的文章 |
-
-### 步骤 1：创建文章
-
-- **接口**: `POST /posts`
-- **请求体**:
-  ```json
-  {
-    "title": "场景测试文章",
-    "body": "场景测试内容",
-    "userId": 1
-  }
-  ```
-- **提取变量**:
-  ```json
-  { "name": "newPostId", "source": "response.bodyJson", "path": "$.id" }
-  ```
-- **断言**:
-  ```json
-  { "type": "exists", "source": "response.bodyJson", "path": "$.id" }
-  ```
-
-### 步骤 2：查询文章
-
-- **接口**: `GET /posts/{{newPostId}}`
-- **请求路径参数**:
-  ```json
-  { "id": "{{newPostId}}" }
-  ```
-- **断言**:
-  ```json
-  { "type": "exists", "source": "response.bodyJson", "path": "$.title" }
-  ```
-
-**检查点**：
-- 步骤 1 能成功提取 `newPostId`
-- 步骤 2 能正确使用 `{{newPostId}}` 发出请求
-- 两个步骤都通过断言
+下面这些场景是**实测可用**的，不依赖“模拟写入后可回查”这种错误前提。
 
 ---
 
-## 场景三：多步链路
+## 场景 A：基础查询验证
 
-| 步骤 | 接口 | 说明 |
-|------|------|------|
-| 1 | `POST /posts` | 创建文章，提取 id |
-| 2 | `GET /posts/{{postId}}/comments` | 查询该文章的评论 |
+### 步骤
+1. `GET /posts/1`
+2. `GET /users/1`
+3. `GET /posts/1/comments?_limit=2`
 
-### 步骤 1：创建文章
-
-- **接口**: `POST /posts`
-- **请求体**:
-  ```json
-  {
-    "title": "多步测试",
-    "body": "多步测试内容",
-    "userId": 1
-  }
-  ```
-- **提取变量**:
-  ```json
-  { "name": "postId", "source": "response.bodyJson", "path": "$.id" }
-  ```
-- **断言**:
-  ```json
-  { "type": "exists", "source": "response.bodyJson", "path": "$.id" }
-  ```
-
-### 步骤 2：查询评论
-
-- **接口**: `GET /posts/{{postId}}/comments`
-- **断言**:
-  ```json
-  { "type": "exists", "source": "response.bodyJson", "path": "$.id" }
-  ```
-
-**检查点**：
-- 变量正确传递
-- 评论列表返回正常（空列表也正常）
+### 核心检查点
+- 请求是否正常发出
+- 嵌套 JSON 是否能正确解析
+- 数组断言是否工作正常
 
 ---
 
-## 场景四：异常处理测试
+## 场景 B：提取变量并串联真实可查接口
 
-| 步骤 | 接口 | 说明 |
-|------|------|------|
-| 1 | `GET /posts/99999` | 查询不存在文章，预期失败 |
-| 2 | `GET /posts/1` | 查询正常文章，验证 stopOnFailure |
+这个场景比“POST 后再 GET”更靠谱。
 
-**检查点**：
-- 步骤 1 应该失败（404）
-- 如果 `stopOnFailure: true`，步骤 2 应该被跳过
-- 如果 `stopOnFailure: false`，步骤 2 应该正常执行
+### 步骤 1：查询文章
+```http
+GET /posts/1
+```
+
+### 从响应中提取
+```json
+{ "name": "userId", "source": "response.bodyJson", "path": "$.userId" }
+```
+
+### 步骤 2：查询该用户资料
+```http
+GET /users/{{userId}}
+```
+
+### 断言建议
+```json
+{ "type": "equals", "source": "response.bodyJson", "path": "$.id", "expected": 1 }
+```
+
+### 步骤 3：查询该用户的文章
+```http
+GET /users/{{userId}}/posts
+```
+
+### 断言建议
+```json
+{ "type": "gt", "source": "response.bodyJson", "path": "$.length", "expected": 0 }
+```
+
+> 如果你平台里 `$.length` 对数组长度支持还不完美，就直接用 `exists` 验证第一项，例如：`$.0.id`
 
 ---
 
-# 断言类型速查表
+## 场景 C：提取文章 ID，再查评论
 
-| 类型 | 说明 | 示例 |
-|------|------|------|
-| `exists` | 字段存在 | `$.data.id` |
-| `equals` | 值相等 | `$.id` 等于 `101` |
-| `contains` | 包含文本 | `$.title` 包含 `"测试"` |
-| `notEmpty` | 不为空 | `$.data.list` 数组非空 |
-| `regex` | 正则匹配 | `$.email` 匹配 `^Sincere@` |
-| `length` | 长度等于 | `$.data` 数组长度等于 `10` |
-| `gt` | 大于 | `$.count` > `0` |
-| `gte` | 大于等于 | `$.count` >= `0` |
-| `lt` | 小于 | `$.count` < `100` |
-| `lte` | 小于等于 | `$.count` <= `100` |
+### 步骤 1
+```http
+GET /posts/1
+```
+
+### 提取变量
+```json
+{ "name": "postId", "source": "response.bodyJson", "path": "$.id" }
+```
+
+### 步骤 2
+```http
+GET /posts/{{postId}}/comments
+```
+
+### 断言建议
+```json
+{ "type": "exists", "source": "response.bodyJson", "path": "$.0.email" }
+```
+
+这个场景很适合测：
+- 变量提取
+- 变量引用
+- 数组路径读取
 
 ---
 
-# 你测的时候重点看这几个东西
+## 场景 D：异常中断测试
 
-### 1）基本通不通
-- 请求发出去能不能拿到正常响应
-- 响应数据能不能正常解析
+### 步骤 1
+```http
+GET /posts/99999
+```
 
-### 2）变量提取和引用
-- 步骤1 创建文章后，能不能提取 `$.id`
-- 步骤2 能不能用 `{{newPostId}}` 拿到这个值
-- 这是场景编排能力最核心的验证点
+### 步骤 2
+```http
+GET /users/1
+```
 
-### 3）断言
-- 用 `exists` 断言字段存在
-- 用 `equals` 断言某个值
-- 用 `length` 断言数组长度
-- 用 `contains` 断言文本包含
+### 测试点
+- 如果 `stopOnFailure = true`
+  - 第二步应被跳过
+- 如果 `stopOnFailure = false`
+  - 第二步应继续执行
 
-### 4）异常处理
-- 查 `/posts/99999`（不存在），看你的平台怎么处理失败
-- 失败后下一步是否按 `stopOnFailure` 设置正确处理
+---
 
-### 5）历史记录
-- 场景执行后，是否能在运行历史里看到
-- 能否看到每一步的明细
+## 场景 E：写接口响应验证（只测响应，不测持久化）
+
+### 步骤 1
+```http
+POST /posts
+```
+
+请求体：
+```json
+{
+  "title": "测试文章",
+  "body": "这是测试内容",
+  "userId": 1
+}
+```
+
+### 断言
+```json
+{ "type": "equals", "source": "response.bodyJson", "path": "$.id", "expected": 101 }
+```
+
+```json
+{ "type": "equals", "source": "response.bodyJson", "path": "$.title", "expected": "测试文章" }
+```
+
+> 不要把后续步骤写成 `GET /posts/101`，因为实测查不到。
+
+---
+
+## 三、适合你平台的验证点
+
+你现在用这套接口，重点测这些：
+
+### 1）接口基础执行是否正常
+- 请求发起
+- 响应解析
+- 历史结果记录
+
+### 2）变量提取与引用
+- 从 `GET /posts/1` 提取 `userId`
+- 在后续 `/users/{{userId}}` 里引用
+
+### 3）断言系统
+- `exists`
+- `equals`
+- `contains`
+- `length`
+- `gt/gte/lt/lte`
+
+### 4）失败处理
+- 404 是否正确显示
+- stopOnFailure 是否生效
+
+### 5）场景编排
+- 多步骤串联
+- 执行顺序
+- 跳过逻辑
+- 变量快照
+
+---
+
+## 四、这次修正的核心结论
+
+### 可以依赖的
+- 查询接口真实返回值
+- 写接口的即时响应内容
+
+### 不可以依赖的
+- POST / PUT / PATCH / DELETE 之后的持久化状态
+- 新建资源后再次 GET 一定可查到
+
+---
+
+## 五、推荐你现在先这样测
+
+### 第一组：最稳妥
+1. `GET /posts/1`
+2. `GET /users/1`
+3. `GET /posts/1/comments?_limit=2`
+
+### 第二组：测场景能力
+1. `GET /posts/1` → 提取 `userId`
+2. `GET /users/{{userId}}`
+3. `GET /users/{{userId}}/posts`
+
+### 第三组：测异常路径
+1. `GET /posts/99999`
+2. `GET /users/1`
+
+### 第四组：测写接口响应
+1. `POST /posts`
+2. `POST /comments`
+3. `PUT /posts/1`
+4. `PATCH /posts/1`
+5. `DELETE /posts/1`
+
+---
+
+如果你要，我下一步可以直接再给你补一份：
+
+**“适合 AI-Test-API 平台导入的最小 JSONPlaceholder 场景模板”**
+
+也就是我直接按你现在这个系统的数据结构，给你一份可粘贴/可导入的接口与场景 JSON。

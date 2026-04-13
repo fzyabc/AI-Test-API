@@ -28,9 +28,7 @@ function backupFiles(fileNames) {
   rmIfExists(backupDir);
   fs.mkdirSync(backupDir, { recursive: true });
   for (const name of fileNames) {
-    const source = path.join(dataDir, name);
-    const backup = path.join(backupDir, name);
-    copyIfExists(source, backup);
+    copyIfExists(path.join(dataDir, name), path.join(backupDir, name));
   }
 }
 
@@ -140,6 +138,11 @@ async function main() {
                   pathParams: {},
                   body: '',
                   expected: { businessCode: 200 },
+                  expectedMeta: {
+                    businessCodeSource: 'ai_guess',
+                    businessCodeVerified: false,
+                    businessCodeUpdatedAt: '',
+                  },
                 },
               ],
             },
@@ -172,6 +175,30 @@ async function main() {
       throw new Error(`Unexpected summary: ${JSON.stringify(run.summary)}`);
     }
 
+    const fillResponse = await fetch(`http://127.0.0.1:${appPort}/api/runs/${run.id}/fill-business-codes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const fillResult = await fillResponse.json();
+    if (!fillResponse.ok) {
+      throw new Error(`fill-business-codes failed: ${JSON.stringify(fillResult)}`);
+    }
+    if (fillResult.filledCount !== 0 || fillResult.skippedCount !== 1) {
+      throw new Error(`Unexpected fill result: ${JSON.stringify(fillResult)}`);
+    }
+
+    const interfacesResponse = await fetch(`http://127.0.0.1:${appPort}/api/interfaces`);
+    const interfacesPayload = await interfacesResponse.json();
+    if (!interfacesResponse.ok) {
+      throw new Error(`load interfaces failed: ${JSON.stringify(interfacesPayload)}`);
+    }
+
+    const expectedMeta = interfacesPayload.interfaces[0].cases[0].expectedMeta || {};
+    if (expectedMeta.businessCodeVerified !== true || expectedMeta.businessCodeSource !== 'actual_run') {
+      throw new Error(`Unexpected expectedMeta after fill: ${JSON.stringify(expectedMeta)}`);
+    }
+
     console.log(
       JSON.stringify(
         {
@@ -179,6 +206,7 @@ async function main() {
           executionMode: run.executionMode,
           summary: run.summary,
           runId: run.id,
+          expectedMeta,
         },
         null,
         2,

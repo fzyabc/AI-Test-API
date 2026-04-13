@@ -1517,6 +1517,7 @@ function renderCaseList() {
       <strong>${escapeHtml(item.name || "")}</strong>
       <div class="muted">${escapeHtml(item.description || "")}</div>
       <div class="tiny-muted">账号: ${escapeHtml(getAuthProfileName(item.authProfileId))}</div>
+      <div class="tiny-muted">${escapeHtml(getBusinessCodeStatusText(item))}</div>
     `;
     row.onclick = () => {
       state.selectedCaseId = item.id;
@@ -1525,6 +1526,25 @@ function renderCaseList() {
     };
     container.appendChild(row);
   }
+}
+
+function getBusinessCodeStatusText(item) {
+  const source = String(item?.expectedMeta?.businessCodeSource || "manual");
+  const verified = Boolean(item?.expectedMeta?.businessCodeVerified);
+  const hasCode = item?.expected?.businessCode != null && String(item?.expected?.businessCode).trim() !== "";
+  if (!hasCode) {
+    return "业务码：未设置（建议先执行一次再回填）";
+  }
+  if (verified && source === "actual_run") {
+    return "业务码来源：已由真实运行结果校对";
+  }
+  if (source === "ai_guess") {
+    return "业务码来源：AI 猜测值，建议先执行再回填";
+  }
+  if (source === "unset") {
+    return "业务码：未校对";
+  }
+  return "业务码来源：手工设置";
 }
 
 function populateCaseForm() {
@@ -1541,6 +1561,7 @@ function populateCaseForm() {
   $("#case-headers").value = JSON.stringify(item?.headers || {}, null, 2);
   $("#case-body").value = item?.body || "";
   $("#expected-business-code").value = item?.expected?.businessCode ?? "";
+  $("#expected-business-code-status").textContent = getBusinessCodeStatusText(item);
   $("#expected-message").value = parseMessageIncludes(
     item?.expected?.messageIncludes,
   ).join("||");
@@ -1957,6 +1978,8 @@ async function saveCase(event) {
     return;
   }
 
+  const currentCase = getSelectedCase();
+  const businessCodeValue = $("#expected-business-code").value.trim() || null;
   const payload = {
     id: $("#case-id").value || undefined,
     name: $("#case-name").value.trim(),
@@ -1966,8 +1989,16 @@ async function saveCase(event) {
     headers: safeJsonParse($("#case-headers").value, {}),
     body: $("#case-body").value,
     expected: {
-      businessCode: $("#expected-business-code").value.trim() || null,
+      businessCode: businessCodeValue,
       messageIncludes: $("#expected-message").value.trim(),
+    },
+    expectedMeta: {
+      businessCodeSource: businessCodeValue ? "manual" : "unset",
+      businessCodeVerified: false,
+      businessCodeUpdatedAt:
+        businessCodeValue && currentCase?.expected?.businessCode !== businessCodeValue
+          ? new Date().toISOString()
+          : String(currentCase?.expectedMeta?.businessCodeUpdatedAt || ""),
     },
   };
 
@@ -2347,6 +2378,14 @@ async function importApiDoc(event) {
       ? ["业务分析:", JSON.stringify(result.analysis, null, 2), ""]
       : [];
 
+    const verificationHint = [
+      "",
+      "【导入校对提示】",
+      "- AI 导入的业务码可能是猜测值，不一定准确。",
+      "- 建议先运行一次，再使用“回填业务码”按真实结果校对。",
+      "- 未校对的用例会在“接口与用例”里显示提示。",
+    ];
+
     $("#api-doc-result").textContent = [
       `提供方: ${result.provider}`,
       ...buildAiMetaLines(result.aiMeta),
@@ -2357,6 +2396,7 @@ async function importApiDoc(event) {
       "",
       ...analysisBlock,
       ...(result.notes || []),
+      ...verificationHint,
     ].join("\n");
 
     await loadAll();

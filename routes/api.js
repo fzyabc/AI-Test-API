@@ -920,9 +920,26 @@ function registerApiRoutes(app) {
           if (!testCase.expected) {
             testCase.expected = {};
           }
+          if (!testCase.expectedMeta || typeof testCase.expectedMeta !== "object") {
+            testCase.expectedMeta = {};
+          }
           testCase.expected.businessCode = actualCode;
+          testCase.expectedMeta.businessCodeSource = "actual_run";
+          testCase.expectedMeta.businessCodeVerified = true;
+          testCase.expectedMeta.businessCodeUpdatedAt = new Date().toISOString();
           filledCount += 1;
         } else {
+          if (!testCase.expectedMeta || typeof testCase.expectedMeta !== "object") {
+            testCase.expectedMeta = {};
+          }
+          if (testCase.expected.businessCode != null) {
+            testCase.expectedMeta.businessCodeVerified = true;
+            testCase.expectedMeta.businessCodeUpdatedAt = new Date().toISOString();
+            testCase.expectedMeta.businessCodeSource =
+              String(testCase.expectedMeta.businessCodeSource || "manual") === "ai_guess"
+                ? "actual_run"
+                : String(testCase.expectedMeta.businessCodeSource || "manual");
+          }
           skippedCount += 1;
         }
       }

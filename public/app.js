@@ -2290,14 +2290,14 @@ async function analyzeSelectedRun() {
   }
 }
 
-async function fillBusinessCodes() {
+async function fillBusinessCodes(runId = state.selectedRunId) {
   try {
-    if (!state.selectedRunId) {
+    if (!runId) {
       showToast("请先选择历史记录", "error");
       return;
     }
     const result = await apiFetch(
-      `/api/runs/${state.selectedRunId}/fill-business-codes`,
+      `/api/runs/${runId}/fill-business-codes`,
       { method: "POST" },
     );
     showToast(
@@ -2457,7 +2457,15 @@ window.addEventListener("DOMContentLoaded", async () => {
   $("#analyze-latest-btn").onclick = analyzeLatest;
   $("#analyze-selected-run-btn").onclick = analyzeSelectedRun;
 
-  $("#fill-business-codes-btn").onclick = fillBusinessCodes;
+  $("#fill-business-codes-btn").onclick = () => fillBusinessCodes();
+  $("#fill-latest-business-codes-btn").onclick = () => {
+    const latest = state.runs[0];
+    if (!latest) {
+      showToast("暂无最新记录", "error");
+      return;
+    }
+    fillBusinessCodes(latest.id);
+  };
   $("#run-auth-profile").onchange = (event) => {
     state.runAuthProfileId = event.target.value;
   };

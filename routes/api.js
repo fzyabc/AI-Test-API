@@ -872,6 +872,70 @@ function registerApiRoutes(app) {
   );
 
   app.post(
+    "/api/runs/:id/fill-business-codes",
+    asyncHandler(async (req, res) => {
+      const runsPayload = await getRuns();
+      const run = getRunOrThrow(runsPayload, req.params.id);
+      const interfacesPayload = await getInterfaces();
+
+      let filledCount = 0;
+      let skippedCount = 0;
+
+      for (const result of run.results || []) {
+        const transportError = result.response?.transportError;
+        const responseBody = result.response?.bodyJson;
+        if (transportError || !responseBody || typeof responseBody !== "object") {
+          skippedCount += 1;
+          continue;
+        }
+
+        const actualCode = responseBody.code;
+        if (actualCode === undefined || actualCode === null) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const interfaceId = result.interfaceId;
+        const caseId = result.caseId;
+        const apiInterface = interfacesPayload.interfaces.find(
+          (item) => item.id === interfaceId,
+        );
+        if (!apiInterface) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const testCase = (apiInterface.cases || []).find(
+          (item) => item.id === caseId,
+        );
+        if (!testCase) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const expectedCode = testCase.expected?.businessCode;
+        const targetCode = Number(actualCode);
+        if (Number.isFinite(targetCode) && expectedCode !== targetCode) {
+          if (!testCase.expected) {
+            testCase.expected = {};
+          }
+          testCase.expected.businessCode = targetCode;
+          filledCount += 1;
+        } else {
+          skippedCount += 1;
+        }
+      }
+
+      await saveInterfaces(interfacesPayload);
+      res.json({
+        ok: true,
+        filledCount,
+        skippedCount,
+      });
+    }),
+  );
+
+  app.post(
     "/api/runs/:id/analyze",
     asyncHandler(async (req, res) => {
       const settings = await getSettings();

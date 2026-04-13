@@ -2290,6 +2290,29 @@ async function analyzeSelectedRun() {
   }
 }
 
+async function fillBusinessCodes() {
+  try {
+    if (!state.selectedRunId) {
+      showToast("请先选择历史记录", "error");
+      return;
+    }
+    const result = await apiFetch(
+      `/api/runs/${state.selectedRunId}/fill-business-codes`,
+      { method: "POST" },
+    );
+    showToast(
+      `回填完成：更新 ${result.filledCount} 个，跳过 ${result.skippedCount} 个`,
+    );
+    // 回填后刷新接口/用例数据，让表单显示最新业务码
+    await loadInterfacesOnly();
+    renderInterfaceList();
+    renderCaseList();
+    populateCaseForm();
+  } catch (error) {
+    showToast(`回填失败: ${error.message}`, "error");
+  }
+}
+
 async function handleDocFileChange(event) {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -2433,6 +2456,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   $("#run-all-btn").onclick = runAllCases;
   $("#analyze-latest-btn").onclick = analyzeLatest;
   $("#analyze-selected-run-btn").onclick = analyzeSelectedRun;
+
+  $("#fill-business-codes-btn").onclick = fillBusinessCodes;
   $("#run-auth-profile").onchange = (event) => {
     state.runAuthProfileId = event.target.value;
   };

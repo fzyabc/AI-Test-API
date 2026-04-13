@@ -2298,6 +2298,15 @@ async function runAllCases(options = {}) {
       `${onlyUnverified ? "未校对用例" : "执行"}完成: 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`,
     );
 
+    if (onlyUnverified) {
+      const shouldFill = window.confirm(
+        `未校对用例已执行完成（通过 ${run.summary.passed} / 失败 ${run.summary.failed}）。\n是否立即按本次结果回填业务码？`,
+      );
+      if (shouldFill) {
+        await fillBusinessCodes(run.id);
+      }
+    }
+
     state.dashboardRunId = run.id;
     const dashRunChat = $("#dashboard-run-chat");
     if (dashRunChat) {

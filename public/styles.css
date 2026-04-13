@@ -113,6 +113,21 @@ textarea { min-height: 88px; resize: vertical; }
 .list { display: grid; gap: 10px; }
 .list-item { border: 1px solid var(--line); border-radius: 14px; background: var(--panel-strong); padding: 12px; cursor: pointer; }
 .list-item.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(192, 90, 43, 0.18); }
+.list-item.verified-highlight {
+  border-color: rgba(37, 108, 63, 0.45);
+  box-shadow: 0 0 0 2px rgba(37, 108, 63, 0.16);
+  animation: verifiedGlow 1.3s ease-in-out 2;
+}
+
+@keyframes verifiedGlow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px rgba(37, 108, 63, 0.16);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(37, 108, 63, 0.26);
+  }
+}
 .run-list-head {
   display: flex;
   align-items: center;

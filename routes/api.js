@@ -911,6 +911,7 @@ function registerApiRoutes(app) {
 
       let filledCount = 0;
       let skippedCount = 0;
+      const verifiedCases = [];
 
       for (const result of run.results || []) {
         const transportError = result.response?.transportError;
@@ -956,6 +957,7 @@ function registerApiRoutes(app) {
           testCase.expectedMeta.businessCodeSource = "actual_run";
           testCase.expectedMeta.businessCodeVerified = true;
           testCase.expectedMeta.businessCodeUpdatedAt = new Date().toISOString();
+          verifiedCases.push({ interfaceId, caseId });
           filledCount += 1;
         } else {
           if (!testCase.expectedMeta || typeof testCase.expectedMeta !== "object") {
@@ -968,16 +970,19 @@ function registerApiRoutes(app) {
               String(testCase.expectedMeta.businessCodeSource || "manual") === "ai_guess"
                 ? "actual_run"
                 : String(testCase.expectedMeta.businessCodeSource || "manual");
+            verifiedCases.push({ interfaceId, caseId });
           }
           skippedCount += 1;
         }
       }
 
       await saveInterfaces(interfacesPayload);
+
       res.json({
         ok: true,
         filledCount,
         skippedCount,
+        verifiedCases,
       });
     }),
   );

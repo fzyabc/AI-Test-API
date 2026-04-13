@@ -20,6 +20,7 @@ const state = {
   runChatMessages: {}, // { [runId]: [{role, content, time}] }
   dashboardRunId: "",
   retestUpdates: {}, // { "interfaceId:caseId": { pass, assertionSummary, label } }
+  lastVerifiedCaseKeys: new Set(),
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -1528,12 +1529,15 @@ function renderCaseList() {
 
   for (const item of cases) {
     const row = document.createElement("div");
-    row.className = `list-item ${item.id === state.selectedCaseId ? "active" : ""}`;
+    const caseKey = `${apiInterface.id}:${item.id}`;
+    const verifiedHighlight = state.lastVerifiedCaseKeys.has(caseKey);
+    row.className = `list-item ${item.id === state.selectedCaseId ? "active" : ""} ${verifiedHighlight ? "verified-highlight" : ""}`;
     row.innerHTML = `
       <strong>${escapeHtml(item.name || "")}</strong>
       <div class="muted">${escapeHtml(item.description || "")}</div>
       <div class="tiny-muted">账号: ${escapeHtml(getAuthProfileName(item.authProfileId))}</div>
       <div class="tiny-muted">${escapeHtml(getBusinessCodeStatusText(item))}</div>
+      ${verifiedHighlight ? '<div class="tiny-muted status-pass">✓ 刚完成校对</div>' : ""}
     `;
     row.onclick = () => {
       state.selectedCaseId = item.id;
@@ -2307,15 +2311,24 @@ async function runAllCases(options = {}) {
 
     if (onlyUnverified) {
       const mode = String(state.settings?.ai?.unverifiedRunFillMode || "confirm");
+      let filledNow = false;
       if (mode === "always") {
         await fillBusinessCodes(run.id);
+        filledNow = true;
       } else if (mode === "confirm") {
         const shouldFill = window.confirm(
           `未校对用例已执行完成（通过 ${run.summary.passed} / 失败 ${run.summary.failed}）。\n是否立即按本次结果回填业务码？`,
         );
         if (shouldFill) {
           await fillBusinessCodes(run.id);
+          filledNow = true;
         }
+      }
+
+      if (filledNow) {
+        state.caseFilterMode = "unverified";
+        showTab("interfaces");
+        await refreshTabData("interfaces");
       }
     }
 
@@ -2385,6 +2398,16 @@ async function analyzeSelectedRun() {
   }
 }
 
+function setVerifiedHighlights(items = []) {
+  state.lastVerifiedCaseKeys = new Set(
+    (items || []).map((item) => `${item.interfaceId}:${item.caseId}`),
+  );
+  window.setTimeout(() => {
+    state.lastVerifiedCaseKeys = new Set();
+    renderCaseList();
+  }, 10000);
+}
+
 async function fillBusinessCodes(runId = state.selectedRunId) {
   try {
     if (!runId) {
@@ -2400,6 +2423,7 @@ async function fillBusinessCodes(runId = state.selectedRunId) {
     );
     // 回填后刷新接口/用例数据，让表单显示最新业务码
     await loadInterfacesOnly();
+    setVerifiedHighlights(result.verifiedCases || []);
     renderInterfaceList();
     renderCaseList();
     populateCaseForm();

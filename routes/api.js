@@ -144,6 +144,26 @@ function ensureBugStatus(status) {
   }
 }
 
+function isUnverifiedCase(testCase = {}) {
+  return testCase?.expectedMeta?.businessCodeVerified !== true;
+}
+
+function filterInterfacesForUnverifiedCases(interfacesPayload) {
+  const nextPayload = {
+    ...interfacesPayload,
+    interfaces: (interfacesPayload.interfaces || [])
+      .map((apiInterface) => ({
+        ...apiInterface,
+        cases: (apiInterface.cases || []).filter((testCase) =>
+          isUnverifiedCase(testCase),
+        ),
+      }))
+      .filter((apiInterface) => (apiInterface.cases || []).length > 0),
+  };
+
+  return nextPayload;
+}
+
 function registerApiRoutes(app) {
   app.get(
     "/api/settings",
@@ -684,8 +704,12 @@ function registerApiRoutes(app) {
       const forceNoAuth = requestedAuthProfileId === "__public__";
       const runInstruction = String(input.aiInstruction || "").trim();
       const runContext = String(input.aiContext || "").trim();
+      const onlyUnverified = input.onlyUnverified === true;
       const settings = await getSettings();
-      const interfacesPayload = await getInterfaces();
+      const allInterfacesPayload = await getInterfaces();
+      const interfacesPayload = onlyUnverified
+        ? filterInterfacesForUnverifiedCases(allInterfacesPayload)
+        : allInterfacesPayload;
       const docContexts = await getDocContexts();
       const executionMode = normalizeExecutionMode(settings.executionMode);
       const overrideProfile =
@@ -699,6 +723,10 @@ function registerApiRoutes(app) {
         throw validationError("Selected auth profile not found", {
           authProfileId: requestedAuthProfileId,
         });
+      }
+
+      if (onlyUnverified && (!interfacesPayload.interfaces || !interfacesPayload.interfaces.length)) {
+        throw validationError("暂无未校对用例可执行");
       }
 
       const startedAt = new Date().toISOString();
@@ -742,6 +770,7 @@ function registerApiRoutes(app) {
         executionMode,
         runInstruction,
         runContext,
+        caseSelection: onlyUnverified ? "unverified" : "all",
         executionProfile: forceNoAuth
           ? {
               mode: "public",

@@ -43,7 +43,10 @@
               AI Context (PRD/API/Business)
               <textarea id="run-ai-context" placeholder="可贴 PRD 片段、业务规则、额外接口说明。仅用于本次执行。"></textarea>
             </label>
-            <button id="run-all-btn" type="button" class="primary">运行全部用例</button>
+            <div class="row">
+              <button id="run-all-btn" type="button" class="primary">运行全部用例</button>
+              <button id="run-unverified-btn" type="button" class="secondary">只跑未校对用例</button>
+            </div>
           </div>
         </div>
 
@@ -151,7 +154,13 @@
             <div class="card">
               <div class="row-between">
                 <h3>用例列表</h3>
-                <button id="new-case-btn" type="button" class="secondary">新增用例</button>
+                <div class="row">
+                  <select id="case-filter-mode">
+                    <option value="all">全部用例</option>
+                    <option value="unverified">仅未校对</option>
+                  </select>
+                  <button id="new-case-btn" type="button" class="secondary">新增用例</button>
+                </div>
               </div>
               <div id="case-list" class="list compact"></div>
             </div>

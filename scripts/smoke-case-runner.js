@@ -144,6 +144,19 @@ async function main() {
                     businessCodeUpdatedAt: '',
                   },
                 },
+                {
+                  id: 'ping-verified',
+                  name: 'Ping Verified',
+                  headers: {},
+                  pathParams: {},
+                  body: '',
+                  expected: { businessCode: 200 },
+                  expectedMeta: {
+                    businessCodeSource: 'actual_run',
+                    businessCodeVerified: true,
+                    businessCodeUpdatedAt: new Date().toISOString(),
+                  },
+                },
               ],
             },
           ],
@@ -171,8 +184,21 @@ async function main() {
     if (run.executionMode !== 'case_runner') {
       throw new Error(`Expected case_runner, got ${run.executionMode}`);
     }
-    if (run.summary?.total !== 1 || run.summary?.passed !== 1 || run.summary?.failed !== 0) {
+    if (run.summary?.total !== 2 || run.summary?.passed !== 2 || run.summary?.failed !== 0) {
       throw new Error(`Unexpected summary: ${JSON.stringify(run.summary)}`);
+    }
+
+    const unverifiedRunResponse = await fetch(`http://127.0.0.1:${appPort}/api/run-all`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ onlyUnverified: true }),
+    });
+    const unverifiedRun = await unverifiedRunResponse.json();
+    if (!unverifiedRunResponse.ok) {
+      throw new Error(`unverified run-all failed: ${JSON.stringify(unverifiedRun)}`);
+    }
+    if (unverifiedRun.caseSelection !== 'unverified' || unverifiedRun.summary?.total !== 1) {
+      throw new Error(`unexpected unverified run summary: ${JSON.stringify(unverifiedRun)}`);
     }
 
     const fillResponse = await fetch(`http://127.0.0.1:${appPort}/api/runs/${run.id}/fill-business-codes`, {
@@ -184,7 +210,7 @@ async function main() {
     if (!fillResponse.ok) {
       throw new Error(`fill-business-codes failed: ${JSON.stringify(fillResult)}`);
     }
-    if (fillResult.filledCount !== 0 || fillResult.skippedCount !== 1) {
+    if (fillResult.filledCount !== 0 || fillResult.skippedCount !== 2) {
       throw new Error(`Unexpected fill result: ${JSON.stringify(fillResult)}`);
     }
 
@@ -194,7 +220,8 @@ async function main() {
       throw new Error(`load interfaces failed: ${JSON.stringify(interfacesPayload)}`);
     }
 
-    const expectedMeta = interfacesPayload.interfaces[0].cases[0].expectedMeta || {};
+    const pingOk = interfacesPayload.interfaces[0].cases.find((item) => item.id === 'ping-ok');
+    const expectedMeta = pingOk?.expectedMeta || {};
     if (expectedMeta.businessCodeVerified !== true || expectedMeta.businessCodeSource !== 'actual_run') {
       throw new Error(`Unexpected expectedMeta after fill: ${JSON.stringify(expectedMeta)}`);
     }

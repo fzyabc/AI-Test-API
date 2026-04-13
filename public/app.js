@@ -4,6 +4,7 @@ const state = {
   scenarios: [],
   runs: [],
   bugs: [],
+  caseFilterMode: "all",
   selectedInterfaceId: "",
   selectedCaseId: "",
   selectedScenarioId: "",
@@ -729,7 +730,11 @@ function renderLatestRun() {
     return;
   }
 
-  const scopeLabel = run.scenario?.name ? `场景 ${run.scenario.name}` : `记录 ${run.id}`;
+  const scopeLabel = run.scenario?.name
+    ? `场景 ${run.scenario.name}`
+    : run.caseSelection === "unverified"
+      ? `未校对用例校对运行 ${run.id}`
+      : `记录 ${run.id}`;
   meta.textContent = `${scopeLabel} | 开始 ${formatBeijingTime(run.startedAt)} | ${getExecutionProfileLabel(run)} | 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`;
   renderRunTable("#latest-run-results", run.results || []);
 }
@@ -1056,10 +1061,8 @@ function getSelectedInterface() {
 
 function getSelectedCase() {
   const apiInterface = getSelectedInterface();
-  return (
-    apiInterface?.cases?.find((item) => item.id === state.selectedCaseId) ||
-    null
-  );
+  const visibleCases = getVisibleCases(apiInterface);
+  return visibleCases.find((item) => item.id === state.selectedCaseId) || null;
 }
 
 function renderInterfaceList() {
@@ -1494,6 +1497,13 @@ async function runSelectedScenario() {
   showToast(`场景执行完成: 通过 ${result.summary.passed} / 失败 ${result.summary.failed}`);
 }
 
+function getVisibleCases(apiInterface) {
+  const sourceCases = apiInterface?.cases || [];
+  return state.caseFilterMode === "unverified"
+    ? sourceCases.filter((item) => isCaseUnverified(item))
+    : sourceCases;
+}
+
 function renderCaseList() {
   const container = $("#case-list");
   if (!container) return;
@@ -1504,10 +1514,16 @@ function renderCaseList() {
     return;
   }
 
-  const cases = apiInterface.cases || [];
+  const cases = getVisibleCases(apiInterface);
   if (!cases.length) {
-    container.innerHTML = '<div class="list-item muted">暂无用例</div>';
+    container.innerHTML = state.caseFilterMode === "unverified"
+      ? '<div class="list-item muted">暂无未校对用例</div>'
+      : '<div class="list-item muted">暂无用例</div>';
     return;
+  }
+
+  if (state.selectedCaseId && !cases.some((item) => item.id === state.selectedCaseId)) {
+    state.selectedCaseId = cases[0]?.id || "";
   }
 
   for (const item of cases) {
@@ -1526,6 +1542,10 @@ function renderCaseList() {
     };
     container.appendChild(row);
   }
+}
+
+function isCaseUnverified(item) {
+  return item?.expectedMeta?.businessCodeVerified !== true;
 }
 
 function getBusinessCodeStatusText(item) {
@@ -1706,7 +1726,11 @@ function clearSelectedRunDetail() {
 
 async function loadRunDetail(runId) {
   const run = await apiFetch(`/api/runs/${runId}`);
-  const scopeLabel = run.scenario?.name ? `场景 ${run.scenario.name}` : `记录 ${run.id}`;
+  const scopeLabel = run.scenario?.name
+    ? `场景 ${run.scenario.name}`
+    : run.caseSelection === "unverified"
+      ? `未校对用例校对运行 ${run.id}`
+      : `记录 ${run.id}`;
   $("#selected-run-meta").textContent =
     `${scopeLabel} | 开始 ${formatBeijingTime(run.startedAt)} | ${getExecutionProfileLabel(run)} | 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`;
   renderRunTable("#selected-run-results", run.results || []);
@@ -1841,6 +1865,10 @@ async function loadAll() {
   populateInterfaceForm();
   renderCaseAuthOptions();
   renderRunAuthOptions();
+  const caseFilterMode = $("#case-filter-mode");
+  if (caseFilterMode) {
+    caseFilterMode.value = state.caseFilterMode;
+  }
   renderCaseList();
   populateCaseForm();
   renderScenarioList();
@@ -1880,6 +1908,10 @@ async function refreshTabData(tabId) {
     populateInterfaceForm();
     renderCaseAuthOptions();
     renderRunAuthOptions();
+    const caseFilterMode = $("#case-filter-mode");
+    if (caseFilterMode) {
+      caseFilterMode.value = state.caseFilterMode;
+    }
     renderCaseList();
     populateCaseForm();
     return;
@@ -2225,21 +2257,31 @@ function buildRunRequestPayload() {
   return payload;
 }
 
-async function runAllCases() {
-  const button = $("#run-all-btn");
-  button.disabled = true;
-  button.textContent = "执行中...";
+async function runAllCases(options = {}) {
+  const onlyUnverified = options.onlyUnverified === true;
+  const primaryButton = $("#run-all-btn");
+  const verificationButton = $("#run-unverified-btn");
+  const activeButton = onlyUnverified ? verificationButton : primaryButton;
+  const idleText = onlyUnverified ? "只跑未校对用例" : "运行全部用例";
+
+  primaryButton.disabled = true;
+  verificationButton.disabled = true;
+  activeButton.textContent = "执行中...";
 
   try {
     await persistSettingsIfDirty();
+    const requestPayload = buildRunRequestPayload();
+    if (onlyUnverified) {
+      requestPayload.onlyUnverified = true;
+    }
     const run = await apiFetch("/api/run-all", {
       method: "POST",
-      body: JSON.stringify(buildRunRequestPayload()),
+      body: JSON.stringify(requestPayload),
     });
 
     state.runs.unshift(run);
     state.selectedRunId = run.id;
-    state.retestUpdates = {}; // 新执行时清空重测记录
+    state.retestUpdates = {};
     renderLatestRun();
     renderRunList();
 
@@ -2247,11 +2289,13 @@ async function runAllCases() {
       const detail = await apiFetch(`/api/runs/${run.id}`);
       $("#ai-report").textContent = detail.aiReport || "暂无 AI 分析";
     } else {
-      $("#ai-report").textContent = "已完成执行，可点击 AI 分析。";
+      $("#ai-report").textContent = onlyUnverified
+        ? "未校对用例执行完成，可直接回填业务码。"
+        : "已完成执行，可点击 AI 分析。";
     }
 
     showToast(
-      `执行完成: 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`,
+      `${onlyUnverified ? "未校对用例" : "执行"}完成: 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`,
     );
 
     state.dashboardRunId = run.id;
@@ -2265,8 +2309,9 @@ async function runAllCases() {
   } catch (error) {
     showToast(`执行失败: ${error.message}`, "error");
   } finally {
-    button.disabled = false;
-    button.textContent = "运行全部用例";
+    primaryButton.disabled = false;
+    verificationButton.disabled = false;
+    activeButton.textContent = idleText;
   }
 }
 
@@ -2491,7 +2536,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       showToast(`读取文档失败: ${error.message}`, "error");
     }
   };
-  $("#run-all-btn").onclick = runAllCases;
+  $("#run-all-btn").onclick = () => runAllCases();
+  $("#run-unverified-btn").onclick = () =>
+    runAllCases({ onlyUnverified: true });
   $("#analyze-latest-btn").onclick = analyzeLatest;
   $("#analyze-selected-run-btn").onclick = analyzeSelectedRun;
 
@@ -2506,6 +2553,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   };
   $("#run-auth-profile").onchange = (event) => {
     state.runAuthProfileId = event.target.value;
+  };
+
+  $("#case-filter-mode").onchange = (event) => {
+    state.caseFilterMode = event.target.value || "all";
+    renderCaseList();
+    populateCaseForm();
   };
 
   $("#new-interface-btn").onclick = () => {

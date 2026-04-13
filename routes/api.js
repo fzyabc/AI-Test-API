@@ -320,7 +320,54 @@ function registerApiRoutes(app) {
         overrideAuthProfileId: forceNoAuth ? "" : requestedAuthProfileId,
         forceNoAuth,
       });
-      res.json(scenarioRun);
+
+      const run = {
+        id: scenarioRun.id,
+        startedAt: scenarioRun.startedAt,
+        finishedAt: scenarioRun.finishedAt,
+        summary: scenarioRun.summary,
+        executionMode: "scenario_runner",
+        runInstruction: "",
+        runContext: "",
+        executionProfile: forceNoAuth
+          ? {
+              mode: "public",
+              authProfileId: "",
+              authProfileName: "",
+              label: "统一无账号执行",
+            }
+          : requestedAuthProfileId
+            ? {
+                mode: "override",
+                authProfileId: requestedAuthProfileId,
+                authProfileName: requestedAuthProfileId,
+                label: `统一使用 ${requestedAuthProfileId}`,
+              }
+            : {
+                mode: "scenario",
+                authProfileId: "",
+                authProfileName: "",
+                label: "按场景步骤执行",
+              },
+        scenario: {
+          id: scenario.id,
+          name: scenario.name,
+        },
+        results: scenarioRun.results,
+        variables: scenarioRun.variables,
+        ai: {
+          enabled: false,
+          analyzed: false,
+          provider: "",
+          meta: null,
+        },
+      };
+
+      const runsPayload = await getRuns();
+      runsPayload.runs.unshift(run);
+      await saveRuns(runsPayload);
+
+      res.json(run);
     }),
   );
 

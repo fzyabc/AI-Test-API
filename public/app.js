@@ -702,10 +702,16 @@ function renderSummary(run) {
     return;
   }
 
+  const failureBreakdown = run.summary?.failureBreakdown || {};
+  const extra = Object.keys(failureBreakdown).length
+    ? `<div class="summary-card"><div class="muted">失败细分</div><div class="value summary-small">运输 ${failureBreakdown.transport_error || 0} / 断言 ${failureBreakdown.assertion_fail || 0} / 前置 ${failureBreakdown.precondition_fail || 0}</div></div>`
+    : `<div class="summary-card"><div class="muted">执行类型</div><div class="value summary-small">${escapeHtml(run.executionMode || "-")}</div></div>`;
+
   container.innerHTML = `
     <div class="summary-card"><div class="muted">总数</div><div class="value">${run.summary.total}</div></div>
     <div class="summary-card"><div class="muted">通过</div><div class="value">${run.summary.passed}</div></div>
     <div class="summary-card"><div class="muted">失败</div><div class="value">${run.summary.failed}</div></div>
+    ${extra}
     <div class="summary-card"><div class="muted">执行账号</div><div class="value summary-small">${escapeHtml(getExecutionProfileLabel(run))}</div></div>
   `;
 }
@@ -722,7 +728,8 @@ function renderLatestRun() {
     return;
   }
 
-  meta.textContent = `记录 ${run.id} | 开始 ${formatBeijingTime(run.startedAt)} | ${getExecutionProfileLabel(run)} | 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`;
+  const scopeLabel = run.scenario?.name ? `场景 ${run.scenario.name}` : `记录 ${run.id}`;
+  meta.textContent = `${scopeLabel} | 开始 ${formatBeijingTime(run.startedAt)} | ${getExecutionProfileLabel(run)} | 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`;
   renderRunTable("#latest-run-results", run.results || []);
 }
 
@@ -1145,6 +1152,93 @@ function populateScenarioForm() {
   $("#scenario-name").value = scenario?.name || "";
   $("#scenario-description").value = scenario?.description || "";
   $("#scenario-steps").value = JSON.stringify(scenario?.steps || [], null, 2);
+  const stepInterfaceSelect = $("#scenario-step-interface");
+  if (stepInterfaceSelect) {
+    const options = ['<option value="">请选择接口</option>']
+      .concat(state.interfaces.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} (${escapeHtml(item.method)} ${escapeHtml(item.path)})</option>`));
+    stepInterfaceSelect.innerHTML = options.join("");
+  }
+  populateScenarioStepCaseOptions();
+}
+
+function populateScenarioStepCaseOptions() {
+  const interfaceId = $("#scenario-step-interface")?.value || "";
+  const caseSelect = $("#scenario-step-case");
+  if (!caseSelect) return;
+  const apiInterface = state.interfaces.find((item) => item.id === interfaceId);
+  const cases = apiInterface?.cases || [];
+  caseSelect.innerHTML = ['<option value="">请选择用例</option>']
+    .concat(cases.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`))
+    .join("");
+}
+
+function appendScenarioStepFromBuilder() {
+  const name = $("#scenario-step-name")?.value.trim();
+  const interfaceId = $("#scenario-step-interface")?.value || "";
+  const caseId = $("#scenario-step-case")?.value || "";
+  const extractName = $("#scenario-step-extract-name")?.value.trim();
+  const extractPath = $("#scenario-step-extract-path")?.value.trim();
+  const assertionType = $("#scenario-step-assert-type")?.value || "exists";
+  const assertionPath = $("#scenario-step-assert-path")?.value.trim();
+  const assertionExpectedRaw = $("#scenario-step-assert-expected")?.value.trim();
+  const requestBodyRaw = $("#scenario-step-body")?.value.trim();
+  const requestPathParamsRaw = $("#scenario-step-path-params")?.value.trim();
+  const requestHeadersRaw = $("#scenario-step-headers")?.value.trim();
+
+  if (!name || !interfaceId || !caseId) {
+    showToast("步骤名、接口、用例不能为空", "error");
+    return;
+  }
+
+  const steps = safeJsonParse($("#scenario-steps").value, []);
+  if (!Array.isArray(steps)) {
+    showToast("当前步骤 JSON 非法", "error");
+    return;
+  }
+
+  const step = {
+    name,
+    interfaceId,
+    caseId,
+  };
+
+  const request = {};
+  if (requestPathParamsRaw) request.pathParams = safeJsonParse(requestPathParamsRaw, {});
+  if (requestHeadersRaw) request.headers = safeJsonParse(requestHeadersRaw, {});
+  if (requestBodyRaw) request.body = safeJsonParse(requestBodyRaw, requestBodyRaw);
+  if (Object.keys(request).length) step.request = request;
+
+  if (extractName && extractPath) {
+    step.extracts = [{ name: extractName, source: "response.bodyJson", path: extractPath }];
+  }
+
+  if (assertionPath) {
+    step.assertions = [{
+      type: assertionType,
+      source: "response.bodyJson",
+      path: assertionPath,
+      expected: assertionExpectedRaw ? safeJsonParse(assertionExpectedRaw, assertionExpectedRaw) : undefined,
+    }];
+  }
+
+  steps.push(step);
+  $("#scenario-steps").value = JSON.stringify(steps, null, 2);
+
+  [
+    "#scenario-step-name",
+    "#scenario-step-extract-name",
+    "#scenario-step-extract-path",
+    "#scenario-step-assert-path",
+    "#scenario-step-assert-expected",
+    "#scenario-step-body",
+    "#scenario-step-path-params",
+    "#scenario-step-headers",
+  ].forEach((selector) => {
+    const el = $(selector);
+    if (el) el.value = "";
+  });
+  if ($("#scenario-step-assert-type")) $("#scenario-step-assert-type").value = "exists";
+  showToast("步骤已追加到 JSON");
 }
 
 function renderScenarioList() {
@@ -1436,8 +1530,9 @@ function clearSelectedRunDetail() {
 
 async function loadRunDetail(runId) {
   const run = await apiFetch(`/api/runs/${runId}`);
+  const scopeLabel = run.scenario?.name ? `场景 ${run.scenario.name}` : `记录 ${run.id}`;
   $("#selected-run-meta").textContent =
-    `记录 ${run.id} | 开始 ${formatBeijingTime(run.startedAt)} | ${getExecutionProfileLabel(run)} | 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`;
+    `${scopeLabel} | 开始 ${formatBeijingTime(run.startedAt)} | ${getExecutionProfileLabel(run)} | 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`;
   renderRunTable("#selected-run-results", run.results || []);
   $("#selected-run-ai-report").textContent = run.aiReport || "暂无 AI 分析";
 
@@ -1495,6 +1590,7 @@ function renderRunList() {
       </div>
       <div class="muted">${formatBeijingTime(run.startedAt)}</div>
       <div class="tiny-muted">${escapeHtml(getExecutionProfileLabel(run))}</div>
+      <div class="tiny-muted">${escapeHtml(run.scenario?.name ? `场景 / ${run.scenario.name}` : run.executionMode || "")}</div>
       <div>通过 ${run.summary.passed} / 失败 ${run.summary.failed}</div>
     `;
     row.onclick = async () => {
@@ -2197,6 +2293,14 @@ window.addEventListener("DOMContentLoaded", async () => {
   $("#new-scenario-btn").onclick = () => {
     state.selectedScenarioId = "";
     populateScenarioForm();
+  };
+
+  $("#scenario-step-interface").onchange = () => {
+    populateScenarioStepCaseOptions();
+  };
+
+  $("#append-scenario-step-btn").onclick = () => {
+    appendScenarioStepFromBuilder();
   };
 
   $("#run-scenario-btn").onclick = async () => {

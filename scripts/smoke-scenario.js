@@ -179,6 +179,9 @@ async function main() {
               request: { pathParams: { userId: '{{userId}}' } },
               assertions: [
                 { type: 'equals', source: 'response.bodyJson', path: '$.data.id', expected: 'user-abc123' },
+                { type: 'regex', source: 'response.bodyJson', path: '$.data.id', expected: '^user-' },
+                { type: 'contains', source: 'response.bodyJson', path: '$.data.status', expected: 'act' },
+                { type: 'length', source: 'response.bodyJson', path: '$.data.id', expected: 11 },
               ],
             },
           ],

@@ -144,6 +144,45 @@ function ensureBugStatus(status) {
   }
 }
 
+function getRunExecutionOptions(run = {}) {
+  const mode = String(run?.executionProfile?.mode || "case");
+  if (mode === "public") {
+    return { forceNoAuth: true, overrideAuthProfileId: "" };
+  }
+  if (mode === "override") {
+    return {
+      overrideAuthProfileId: String(run?.executionProfile?.authProfileId || "").trim(),
+    };
+  }
+  return {};
+}
+
+function getActualMessageFromResponse(responseBody) {
+  if (!responseBody || typeof responseBody !== "object") return "";
+  const candidates = [
+    responseBody.message,
+    responseBody.msg,
+    responseBody.errorMessage,
+    responseBody.reason,
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function buildSimpleRunSummary(results = []) {
+  const total = results.length;
+  const passed = results.filter((item) => item?.pass).length;
+  return {
+    total,
+    passed,
+    failed: total - passed,
+  };
+}
+
 function isUnverifiedCase(testCase = {}) {
   return testCase?.expectedMeta?.businessCodeVerified !== true;
 }
@@ -1204,6 +1243,126 @@ function registerApiRoutes(app) {
         applied,
         appliedCount: applied.length,
         aiMeta: aiResult.meta,
+      });
+    }),
+  );
+
+  app.post(
+    "/api/runs/:id/retest-failures",
+    asyncHandler(async (req, res) => {
+      const sourceRunsPayload = await getRuns();
+      const sourceRun = getRunOrThrow(sourceRunsPayload, req.params.id);
+      const settings = await getSettings();
+      const interfacesPayload = await getInterfaces();
+      const failedResults = (sourceRun.results || []).filter(
+        (item) => item && item.pass === false && item.interfaceId && item.caseId,
+      );
+
+      if (!failedResults.length) {
+        throw validationError("当前记录没有可重跑的失败用例");
+      }
+
+      const executionOptions = getRunExecutionOptions(sourceRun);
+      const retestResults = [];
+
+      for (const item of failedResults) {
+        const apiInterface = getInterfaceOrThrow(interfacesPayload, item.interfaceId);
+        const testCase = getCaseOrThrow(apiInterface, item.caseId);
+        const retestResult = await runCase(
+          settings,
+          apiInterface,
+          testCase,
+          executionOptions,
+          interfacesPayload,
+        );
+        retestResults.push(retestResult);
+      }
+
+      const retestRun = {
+        id: crypto.randomUUID(),
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        summary: buildSimpleRunSummary(retestResults),
+        executionMode: "case_runner",
+        runInstruction: sourceRun.runInstruction || "",
+        runContext: sourceRun.runContext || "",
+        caseSelection: "failed_only",
+        sourceRunId: sourceRun.id,
+        executionProfile: sourceRun.executionProfile || {
+          mode: "case",
+          authProfileId: "",
+          authProfileName: "",
+          label: "按用例账号执行",
+        },
+        results: retestResults,
+        ai: {
+          enabled: false,
+          analyzed: false,
+          provider: "",
+          meta: null,
+        },
+      };
+
+      const latestRunsPayload = await getRuns();
+      latestRunsPayload.runs.unshift(retestRun);
+      await saveRuns(latestRunsPayload);
+      res.json(retestRun);
+    }),
+  );
+
+  app.post(
+    "/api/runs/:id/adopt-failure-results",
+    asyncHandler(async (req, res) => {
+      const sourceRunsPayload = await getRuns();
+      const sourceRun = getRunOrThrow(sourceRunsPayload, req.params.id);
+      const interfacesPayload = await getInterfaces();
+      let updatedCount = 0;
+      let skippedCount = 0;
+      const adoptedCases = [];
+
+      for (const item of sourceRun.results || []) {
+        if (!item || item.pass !== false || !item.interfaceId || !item.caseId) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const apiInterface = getInterfaceOrThrow(interfacesPayload, item.interfaceId);
+        const testCase = getCaseOrThrow(apiInterface, item.caseId);
+        const responseBody = item.response?.bodyJson;
+        const actualCode = extractBusinessCode(responseBody);
+        const actualMessage = getActualMessageFromResponse(responseBody);
+        const nextMessage = actualMessage ? actualMessage : (testCase.expected?.messageIncludes || "");
+
+        if (actualCode === null && !actualMessage) {
+          skippedCount += 1;
+          continue;
+        }
+
+        if (!testCase.expected) {
+          testCase.expected = {};
+        }
+        if (!testCase.expectedMeta || typeof testCase.expectedMeta !== "object") {
+          testCase.expectedMeta = {};
+        }
+
+        testCase.expected.businessCode = actualCode === null ? testCase.expected.businessCode || null : actualCode;
+        testCase.expected.messageIncludes = nextMessage;
+        testCase.expectedMeta.businessCodeSource = "actual_run";
+        testCase.expectedMeta.businessCodeVerified = true;
+        testCase.expectedMeta.businessCodeUpdatedAt = new Date().toISOString();
+        updatedCount += 1;
+        adoptedCases.push({
+          interfaceId: apiInterface.id,
+          caseId: testCase.id,
+        });
+      }
+
+      await saveInterfaces(interfacesPayload);
+      res.json({
+        ok: true,
+        updatedCount,
+        skippedCount,
+        adoptedCases,
       });
     }),
   );

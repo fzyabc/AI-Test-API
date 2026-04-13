@@ -137,7 +137,7 @@ async function main() {
                   headers: {},
                   pathParams: {},
                   body: '',
-                  expected: { businessCode: 200 },
+                  expected: { businessCode: 201, messageIncludes: 'old message' },
                   expectedMeta: {
                     businessCodeSource: 'ai_guess',
                     businessCodeVerified: false,
@@ -184,7 +184,7 @@ async function main() {
     if (run.executionMode !== 'case_runner') {
       throw new Error(`Expected case_runner, got ${run.executionMode}`);
     }
-    if (run.summary?.total !== 2 || run.summary?.passed !== 2 || run.summary?.failed !== 0) {
+    if (run.summary?.total !== 2 || run.summary?.passed !== 1 || run.summary?.failed !== 1) {
       throw new Error(`Unexpected summary: ${JSON.stringify(run.summary)}`);
     }
 
@@ -199,6 +199,32 @@ async function main() {
     }
     if (unverifiedRun.caseSelection !== 'unverified' || unverifiedRun.summary?.total !== 1) {
       throw new Error(`unexpected unverified run summary: ${JSON.stringify(unverifiedRun)}`);
+    }
+
+    const retestFailedResponse = await fetch(`http://127.0.0.1:${appPort}/api/runs/${run.id}/retest-failures`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const retestRun = await retestFailedResponse.json();
+    if (!retestFailedResponse.ok) {
+      throw new Error(`retest-failures failed: ${JSON.stringify(retestRun)}`);
+    }
+    if (retestRun.caseSelection !== 'failed_only' || retestRun.summary?.total !== 1 || retestRun.summary?.passed !== 0) {
+      throw new Error(`Unexpected retest summary: ${JSON.stringify(retestRun)}`);
+    }
+
+    const adoptResponse = await fetch(`http://127.0.0.1:${appPort}/api/runs/${run.id}/adopt-failure-results`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const adoptResult = await adoptResponse.json();
+    if (!adoptResponse.ok) {
+      throw new Error(`adopt-failure-results failed: ${JSON.stringify(adoptResult)}`);
+    }
+    if (adoptResult.updatedCount !== 1) {
+      throw new Error(`Unexpected adopt result: ${JSON.stringify(adoptResult)}`);
     }
 
     const fillResponse = await fetch(`http://127.0.0.1:${appPort}/api/runs/${run.id}/fill-business-codes`, {
@@ -224,6 +250,9 @@ async function main() {
     const expectedMeta = pingOk?.expectedMeta || {};
     if (expectedMeta.businessCodeVerified !== true || expectedMeta.businessCodeSource !== 'actual_run') {
       throw new Error(`Unexpected expectedMeta after fill: ${JSON.stringify(expectedMeta)}`);
+    }
+    if (pingOk?.expected?.businessCode !== 200 || pingOk?.expected?.messageIncludes !== 'ok') {
+      throw new Error(`Unexpected adopted expected values: ${JSON.stringify(pingOk?.expected)}`);
     }
 
     console.log(

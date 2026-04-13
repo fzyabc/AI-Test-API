@@ -21,6 +21,7 @@ const state = {
   dashboardRunId: "",
   retestUpdates: {}, // { "interfaceId:caseId": { pass, assertionSummary, label } }
   lastVerifiedCaseKeys: new Set(),
+  lastAdoptedCaseKeys: new Set(),
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -735,7 +736,9 @@ function renderLatestRun() {
     ? `场景 ${run.scenario.name}`
     : run.caseSelection === "unverified"
       ? `未校对用例校对运行 ${run.id}`
-      : `记录 ${run.id}`;
+      : run.caseSelection === "failed_only"
+        ? `失败项重跑 ${run.id}`
+        : `记录 ${run.id}`;
   meta.textContent = `${scopeLabel} | 开始 ${formatBeijingTime(run.startedAt)} | ${getExecutionProfileLabel(run)} | 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`;
   renderRunTable("#latest-run-results", run.results || []);
 }
@@ -1531,13 +1534,15 @@ function renderCaseList() {
     const row = document.createElement("div");
     const caseKey = `${apiInterface.id}:${item.id}`;
     const verifiedHighlight = state.lastVerifiedCaseKeys.has(caseKey);
-    row.className = `list-item ${item.id === state.selectedCaseId ? "active" : ""} ${verifiedHighlight ? "verified-highlight" : ""}`;
+    const adoptedHighlight = state.lastAdoptedCaseKeys.has(caseKey);
+    row.className = `list-item ${item.id === state.selectedCaseId ? "active" : ""} ${verifiedHighlight ? "verified-highlight" : ""} ${adoptedHighlight ? "adopted-highlight" : ""}`;
     row.innerHTML = `
       <strong>${escapeHtml(item.name || "")}</strong>
       <div class="muted">${escapeHtml(item.description || "")}</div>
       <div class="tiny-muted">账号: ${escapeHtml(getAuthProfileName(item.authProfileId))}</div>
       <div class="tiny-muted">${escapeHtml(getBusinessCodeStatusText(item))}</div>
       ${verifiedHighlight ? '<div class="tiny-muted status-pass">✓ 刚完成校对</div>' : ""}
+      ${adoptedHighlight ? '<div class="tiny-muted status-pass">✓ 刚采纳失败结果</div>' : ""}
     `;
     row.onclick = () => {
       state.selectedCaseId = item.id;
@@ -1740,7 +1745,9 @@ async function loadRunDetail(runId) {
     ? `场景 ${run.scenario.name}`
     : run.caseSelection === "unverified"
       ? `未校对用例校对运行 ${run.id}`
-      : `记录 ${run.id}`;
+      : run.caseSelection === "failed_only"
+        ? `失败项重跑 ${run.id}`
+        : `记录 ${run.id}`;
   $("#selected-run-meta").textContent =
     `${scopeLabel} | 开始 ${formatBeijingTime(run.startedAt)} | ${getExecutionProfileLabel(run)} | 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`;
   renderRunTable("#selected-run-results", run.results || []);
@@ -1800,7 +1807,7 @@ function renderRunList() {
       </div>
       <div class="muted">${formatBeijingTime(run.startedAt)}</div>
       <div class="tiny-muted">${escapeHtml(getExecutionProfileLabel(run))}</div>
-      <div class="tiny-muted">${escapeHtml(run.scenario?.name ? `场景 / ${run.scenario.name}` : run.executionMode || "")}</div>
+      <div class="tiny-muted">${escapeHtml(run.scenario?.name ? `场景 / ${run.scenario.name}` : run.caseSelection === "failed_only" ? "失败项重跑" : run.executionMode || "")}</div>
       <div>通过 ${run.summary.passed} / 失败 ${run.summary.failed}</div>
     `;
     row.onclick = async () => {
@@ -2374,6 +2381,46 @@ async function analyzeLatest() {
   }
 }
 
+async function retestFailedCases() {
+  try {
+    if (!state.selectedRunId) {
+      showToast("请先选择历史记录", "error");
+      return;
+    }
+    const run = await apiFetch(`/api/runs/${state.selectedRunId}/retest-failures`, {
+      method: "POST",
+    });
+    state.runs.unshift(run);
+    state.selectedRunId = run.id;
+    state.retestUpdates = {};
+    renderLatestRun();
+    renderRunList();
+    await loadRunDetail(run.id);
+    showToast(`失败项重跑完成: 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`);
+  } catch (error) {
+    showToast(`失败项重跑失败: ${error.message}`, "error");
+  }
+}
+
+async function adoptFailureResults() {
+  try {
+    if (!state.selectedRunId) {
+      showToast("请先选择历史记录", "error");
+      return;
+    }
+    const result = await apiFetch(`/api/runs/${state.selectedRunId}/adopt-failure-results`, {
+      method: "POST",
+    });
+    await loadInterfacesOnly();
+    setAdoptedHighlights(result.adoptedCases || []);
+    showTab("interfaces");
+    await refreshTabData("interfaces");
+    showToast(`采纳完成：更新 ${result.updatedCount} 个，跳过 ${result.skippedCount} 个`);
+  } catch (error) {
+    showToast(`批量采纳失败: ${error.message}`, "error");
+  }
+}
+
 async function analyzeSelectedRun() {
   try {
     if (!state.selectedRunId) {
@@ -2404,6 +2451,16 @@ function setVerifiedHighlights(items = []) {
   );
   window.setTimeout(() => {
     state.lastVerifiedCaseKeys = new Set();
+    renderCaseList();
+  }, 10000);
+}
+
+function setAdoptedHighlights(items = []) {
+  state.lastAdoptedCaseKeys = new Set(
+    (items || []).map((item) => `${item.interfaceId}:${item.caseId}`),
+  );
+  window.setTimeout(() => {
+    state.lastAdoptedCaseKeys = new Set();
     renderCaseList();
   }, 10000);
 }
@@ -2587,6 +2644,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     runAllCases({ onlyUnverified: true });
   $("#analyze-latest-btn").onclick = analyzeLatest;
   $("#analyze-selected-run-btn").onclick = analyzeSelectedRun;
+  $("#retest-failed-btn").onclick = retestFailedCases;
+  $("#adopt-failure-results-btn").onclick = adoptFailureResults;
 
   $("#fill-business-codes-btn").onclick = () => fillBusinessCodes();
   $("#fill-latest-business-codes-btn").onclick = () => {

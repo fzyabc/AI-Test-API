@@ -1,5 +1,6 @@
 const express = require("express");
 const path = require("path");
+const { isHttpError } = require("./lib/http-errors");
 const { registerApiRoutes } = require("./routes/api");
 
 const app = express();
@@ -24,10 +25,23 @@ app.get("*", (_req, res) => {
 });
 
 app.use((error, _req, res, _next) => {
-  console.error(error);
-  res.status(500).json({
-    message: error.message || "Internal server error",
-    stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+  const status = isHttpError(error) ? Number(error.status || 500) : 500;
+  const code = String(error?.code || (status >= 500 ? "INTERNAL_ERROR" : "HTTP_ERROR"));
+  const message =
+    status >= 500 ? "Internal server error" : error.message || "Request failed";
+
+  if (status >= 500) {
+    console.error(error);
+  }
+
+  res.status(status).json({
+    ok: false,
+    error: {
+      code,
+      message,
+      details: error?.details,
+    },
+    stack: process.env.NODE_ENV === "development" ? error?.stack : undefined,
   });
 });
 

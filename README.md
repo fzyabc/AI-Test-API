@@ -35,6 +35,7 @@ http://localhost:3006
 
 - Manage interfaces in the UI
 - Add and edit cases under each interface
+- Build multi-step scenarios with variable extraction / variable reference / step assertions
 - Maintain base URL and auth profiles
 - Run with case-level auth or temporarily override all authenticated cases to a selected account
 - Configure AI URL / API key / model
@@ -64,6 +65,7 @@ Local JSON files:
 - `data/settings.json`
 - `data/interfaces.json`
 - `data/runs.json`
+- `data/scenarios.json`
 - `data/ai-reports/*.md`
 
 ## Notes

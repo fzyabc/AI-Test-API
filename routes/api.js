@@ -5,6 +5,7 @@ const {
   getDocContexts,
   getInterfaces,
   getRuns,
+  getScenarios,
   getSettings,
   readAiReport,
   saveBugs,
@@ -12,12 +13,14 @@ const {
   saveAiReport,
   saveInterfaces,
   saveRuns,
+  saveScenarios,
   saveSettings,
 } = require("../lib/store");
 const { analyzeRunWithAi } = require("../lib/ai");
 const { importApiDocument } = require("../lib/doc-import");
 const { runAllWithAiAgent } = require("../lib/ai-agent-runner");
 const { runAll, runCase } = require("../lib/runner");
+const { runScenario } = require("../lib/scenario-runner");
 const {
   verifyOosLogin,
   callAiText,
@@ -39,6 +42,7 @@ const {
   parseAiChatPayload,
   applyAiChatActions,
 } = require("../lib/server-helpers");
+const { normalizeScenario } = require("../lib/scenario-utils");
 const {
   createHttpError,
   validationError,
@@ -56,6 +60,7 @@ const {
   validateBugUpdateInput,
   validateAiRunChatInput,
   validateRunCaseInput,
+  validateScenarioInput,
 } = require("../lib/validators");
 
 const validBugStatuses = ["open", "confirmed", "fixed", "dismissed"];
@@ -121,6 +126,14 @@ function getCaseOrThrow(apiInterface, caseId) {
     });
   }
   return testCase;
+}
+
+function getScenarioOrThrow(payload, scenarioId) {
+  const scenario = (payload.scenarios || []).find((item) => item.id === scenarioId);
+  if (!scenario) {
+    throw notFoundError("场景不存在", { scenarioId });
+  }
+  return scenario;
 }
 
 function ensureBugStatus(status) {
@@ -239,6 +252,75 @@ function registerApiRoutes(app) {
     "/api/interfaces",
     asyncHandler(async (_req, res) => {
       res.json(await getInterfaces());
+    }),
+  );
+
+  app.get(
+    "/api/scenarios",
+    asyncHandler(async (_req, res) => {
+      res.json(await getScenarios());
+    }),
+  );
+
+  app.post(
+    "/api/scenarios",
+    asyncHandler(async (req, res) => {
+      const input = validateScenarioInput(req.body);
+      const payload = await getScenarios();
+      const scenario = normalizeScenario(input);
+      payload.scenarios.unshift(scenario);
+      await saveScenarios(payload);
+      res.json(payload);
+    }),
+  );
+
+  app.put(
+    "/api/scenarios/:id",
+    asyncHandler(async (req, res) => {
+      const input = validateScenarioInput(req.body);
+      const payload = await getScenarios();
+      getScenarioOrThrow(payload, req.params.id);
+      payload.scenarios = (payload.scenarios || []).map((item) =>
+        item.id === req.params.id
+          ? {
+              ...normalizeScenario({ ...item, ...input, id: req.params.id }),
+              id: req.params.id,
+            }
+          : item,
+      );
+      await saveScenarios(payload);
+      res.json(payload);
+    }),
+  );
+
+  app.delete(
+    "/api/scenarios/:id",
+    asyncHandler(async (req, res) => {
+      const payload = await getScenarios();
+      getScenarioOrThrow(payload, req.params.id);
+      payload.scenarios = (payload.scenarios || []).filter(
+        (item) => item.id !== req.params.id,
+      );
+      await saveScenarios(payload);
+      res.json(payload);
+    }),
+  );
+
+  app.post(
+    "/api/scenarios/:id/run",
+    asyncHandler(async (req, res) => {
+      const input = validateRunAllInput(req.body);
+      const requestedAuthProfileId = String(input.authProfileId || "").trim();
+      const forceNoAuth = requestedAuthProfileId === "__public__";
+      const settings = await getSettings();
+      const interfacesPayload = await getInterfaces();
+      const scenariosPayload = await getScenarios();
+      const scenario = getScenarioOrThrow(scenariosPayload, req.params.id);
+      const scenarioRun = await runScenario(settings, interfacesPayload, scenario, {
+        overrideAuthProfileId: forceNoAuth ? "" : requestedAuthProfileId,
+        forceNoAuth,
+      });
+      res.json(scenarioRun);
     }),
   );
 

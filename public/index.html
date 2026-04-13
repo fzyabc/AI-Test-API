@@ -15,6 +15,7 @@
       <nav>
         <button type="button" class="nav-btn active" data-tab="dashboard">测试执行</button>
         <button type="button" class="nav-btn" data-tab="interfaces">接口与用例</button>
+        <button type="button" class="nav-btn" data-tab="scenarios">场景编排</button>
         <button type="button" class="nav-btn" data-tab="settings">系统设置</button>
         <button type="button" class="nav-btn" data-tab="ai-chat">AI 对话</button>
         <button type="button" class="nav-btn" data-tab="runs">历史结果</button>
@@ -170,6 +171,72 @@
                 <button id="delete-case-btn" type="button" class="danger">删除用例</button>
               </div>
             </form>
+          </div>
+        </div>
+      </section>
+
+      <section id="scenarios" class="tab-panel">
+        <div class="panel-header">
+          <div>
+            <h2>场景编排</h2>
+            <div class="muted">把多个现有用例串成业务链路，支持变量提取、变量引用和步骤级断言</div>
+          </div>
+          <div class="row">
+            <button id="new-scenario-btn" type="button" class="secondary">新建场景</button>
+            <button id="run-scenario-btn" type="button" class="primary">运行当前场景</button>
+          </div>
+        </div>
+
+        <div class="split">
+          <div class="card">
+            <h3>场景列表</h3>
+            <div id="scenario-list" class="list"></div>
+          </div>
+          <div>
+            <form id="scenario-form" class="card">
+              <h3>场景配置</h3>
+              <input id="scenario-id" type="hidden" />
+              <label>场景名称<input id="scenario-name" type="text" /></label>
+              <label>描述<textarea id="scenario-description"></textarea></label>
+              <label>步骤(JSON)
+                <textarea id="scenario-steps" rows="18" placeholder='[
+  {
+    "name": "创建用户",
+    "interfaceId": "xxx",
+    "caseId": "yyy",
+    "request": {
+      "body": { "name": "demo-{{seed}}" }
+    },
+    "extracts": [
+      { "name": "userId", "source": "response.bodyJson", "path": "$.data.id" }
+    ],
+    "assertions": [
+      { "type": "exists", "source": "response.bodyJson", "path": "$.data.id" }
+    ]
+  }
+]'></textarea>
+              </label>
+              <div class="row">
+                <button type="submit" class="primary">保存场景</button>
+                <button id="delete-scenario-btn" type="button" class="danger">删除场景</button>
+              </div>
+            </form>
+
+            <div class="card">
+              <h3>场景运行结果</h3>
+              <div id="scenario-run-meta" class="muted">暂无执行结果</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>步骤</th>
+                    <th>接口</th>
+                    <th>结果</th>
+                    <th>详情</th>
+                  </tr>
+                </thead>
+                <tbody id="scenario-run-results"></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </section>

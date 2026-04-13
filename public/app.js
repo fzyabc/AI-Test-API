@@ -1,10 +1,12 @@
 const state = {
   settings: null,
   interfaces: [],
+  scenarios: [],
   runs: [],
   bugs: [],
   selectedInterfaceId: "",
   selectedCaseId: "",
+  selectedScenarioId: "",
   selectedRunId: "",
   runAuthProfileId: "__case__",
   settingsDirty: false,
@@ -260,6 +262,23 @@ function buildResultDetailsHtml(item) {
     </details>
     ${item.interfaceId && item.caseId ? `<div class="result-retest-row"><button type="button" class="secondary subtle-btn" data-retest-interface="${escapeHtml(item.interfaceId)}" data-retest-case="${escapeHtml(item.caseId)}" data-retest-case-name="${escapeHtml(item.caseName || "")}" data-retest-interface-name="${escapeHtml(item.interfaceName || "")}">重测此用例 ▾</button></div>` : ""}
   `;
+}
+
+function renderScenarioRunTable(results) {
+  const tbody = $("#scenario-run-results");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+
+  for (const item of results || []) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(item.stepName || item.caseName || "")}</td>
+      <td>${escapeHtml(item.interfaceName || item.interfaceId || "")}</td>
+      <td class="${item.pass ? "status-pass" : "status-fail"}">${item.skipped ? "跳过" : item.pass ? "通过" : "失败"}</td>
+      <td class="result-detail-cell">${buildResultDetailsHtml(item)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
 }
 
 function renderRunTable(tbodySelector, results) {
@@ -1114,6 +1133,118 @@ function renderRunAuthOptions() {
   select.value = state.runAuthProfileId;
 }
 
+function getSelectedScenario() {
+  return (
+    state.scenarios.find((item) => item.id === state.selectedScenarioId) || null
+  );
+}
+
+function populateScenarioForm() {
+  const scenario = getSelectedScenario();
+  $("#scenario-id").value = scenario?.id || "";
+  $("#scenario-name").value = scenario?.name || "";
+  $("#scenario-description").value = scenario?.description || "";
+  $("#scenario-steps").value = JSON.stringify(scenario?.steps || [], null, 2);
+}
+
+function renderScenarioList() {
+  const container = $("#scenario-list");
+  if (!container) return;
+  container.innerHTML = "";
+
+  if (!state.scenarios.length) {
+    container.innerHTML = '<div class="list-item muted">暂无场景</div>';
+    $("#scenario-run-meta").textContent = "暂无执行结果";
+    renderScenarioRunTable([]);
+    return;
+  }
+
+  for (const scenario of state.scenarios) {
+    const row = document.createElement("div");
+    row.className = `list-item ${scenario.id === state.selectedScenarioId ? "active" : ""}`;
+    row.innerHTML = `
+      <strong>${escapeHtml(scenario.name || "未命名场景")}</strong>
+      <div class="muted">${escapeHtml(scenario.description || "-")}</div>
+      <div class="tiny-muted">步骤数 ${(scenario.steps || []).length}</div>
+    `;
+    row.onclick = () => {
+      state.selectedScenarioId = scenario.id;
+      renderScenarioList();
+      populateScenarioForm();
+    };
+    container.appendChild(row);
+  }
+}
+
+async function saveScenario(event) {
+  event.preventDefault();
+  const payload = {
+    id: $("#scenario-id").value || undefined,
+    name: $("#scenario-name").value.trim(),
+    description: $("#scenario-description").value.trim(),
+    steps: safeJsonParse($("#scenario-steps").value, null),
+  };
+
+  if (!payload.name) {
+    showToast("场景名称不能为空", "error");
+    return;
+  }
+  if (!Array.isArray(payload.steps)) {
+    showToast("步骤必须是合法 JSON 数组", "error");
+    return;
+  }
+
+  if (payload.id) {
+    await apiFetch(`/api/scenarios/${payload.id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+    showToast("场景已更新");
+  } else {
+    await apiFetch("/api/scenarios", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    showToast("场景已创建");
+  }
+
+  await loadScenariosOnly();
+  if (!payload.id) {
+    state.selectedScenarioId = state.scenarios[0]?.id || "";
+  }
+  renderScenarioList();
+  populateScenarioForm();
+}
+
+async function deleteSelectedScenario() {
+  const scenario = getSelectedScenario();
+  if (!scenario) {
+    showToast("请先选择场景", "error");
+    return;
+  }
+  await apiFetch(`/api/scenarios/${scenario.id}`, { method: "DELETE" });
+  state.selectedScenarioId = "";
+  await loadScenariosOnly();
+  renderScenarioList();
+  populateScenarioForm();
+  showToast("场景已删除");
+}
+
+async function runSelectedScenario() {
+  const scenario = getSelectedScenario();
+  if (!scenario) {
+    showToast("请先选择场景", "error");
+    return;
+  }
+  const result = await apiFetch(`/api/scenarios/${scenario.id}/run`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  $("#scenario-run-meta").textContent = `场景 ${result.scenarioName} | 开始 ${formatBeijingTime(result.startedAt)} | 通过 ${result.summary.passed} / 失败 ${result.summary.failed}`;
+  renderScenarioRunTable(result.results || []);
+  showToast(`场景执行完成: 通过 ${result.summary.passed} / 失败 ${result.summary.failed}`);
+}
+
 function renderCaseList() {
   const container = $("#case-list");
   if (!container) return;
@@ -1402,6 +1533,17 @@ async function loadInterfacesOnly() {
   }
 }
 
+async function loadScenariosOnly() {
+  const payload = await apiFetch("/api/scenarios");
+  state.scenarios = payload.scenarios || [];
+  if (
+    !state.selectedScenarioId ||
+    !state.scenarios.some((item) => item.id === state.selectedScenarioId)
+  ) {
+    state.selectedScenarioId = state.scenarios[0]?.id || "";
+  }
+}
+
 async function loadRunsOnly() {
   const payload = await apiFetch("/api/runs");
   state.runs = payload.runs || [];
@@ -1417,6 +1559,7 @@ async function loadAll() {
   await Promise.all([
     loadSettingsOnly(),
     loadInterfacesOnly(),
+    loadScenariosOnly(),
     loadRunsOnly(),
     loadBugsOnly(),
   ]);
@@ -1428,6 +1571,8 @@ async function loadAll() {
   renderRunAuthOptions();
   renderCaseList();
   populateCaseForm();
+  renderScenarioList();
+  populateScenarioForm();
   renderSettings();
   renderRunList();
   renderAiChatLog();
@@ -1465,6 +1610,13 @@ async function refreshTabData(tabId) {
     renderRunAuthOptions();
     renderCaseList();
     populateCaseForm();
+    return;
+  }
+
+  if (tabId === "scenarios") {
+    await Promise.all([loadScenariosOnly(), loadInterfacesOnly()]);
+    renderScenarioList();
+    populateScenarioForm();
     return;
   }
 
@@ -2011,6 +2163,14 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   };
 
+  $("#scenario-form").onsubmit = async (event) => {
+    try {
+      await saveScenario(event);
+    } catch (error) {
+      showToast(`保存场景失败: ${error.message}`, "error");
+    }
+  };
+
   $("#import-doc-form").onsubmit = importApiDoc;
   $("#api-doc-file").onchange = async (event) => {
     try {
@@ -2032,6 +2192,27 @@ window.addEventListener("DOMContentLoaded", async () => {
     populateInterfaceForm();
     renderCaseList();
     populateCaseForm();
+  };
+
+  $("#new-scenario-btn").onclick = () => {
+    state.selectedScenarioId = "";
+    populateScenarioForm();
+  };
+
+  $("#run-scenario-btn").onclick = async () => {
+    try {
+      await runSelectedScenario();
+    } catch (error) {
+      showToast(`场景执行失败: ${error.message}`, "error");
+    }
+  };
+
+  $("#delete-scenario-btn").onclick = async () => {
+    try {
+      await deleteSelectedScenario();
+    } catch (error) {
+      showToast(`删除场景失败: ${error.message}`, "error");
+    }
   };
 
   $("#delete-interface-btn").onclick = async () => {

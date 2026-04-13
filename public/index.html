@@ -352,6 +352,13 @@
           <label>AI Global Test Instruction
             <textarea id="ai-global-instruction" placeholder="长期生效的业务范围、测试策略、PRD约束、Bug标准"></textarea>
           </label>
+          <label>未校对用例执行后回填策略
+            <select id="unverified-run-fill-mode">
+              <option value="confirm">弹窗确认后回填（推荐）</option>
+              <option value="always">自动回填</option>
+              <option value="manual">仅手动回填</option>
+            </select>
+          </label>
           <div class="row">
             <button type="submit" class="primary">保存设置</button>
           </div>

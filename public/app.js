@@ -1606,6 +1606,11 @@ function normalizeAiSettings(ai = {}) {
     model: String(ai.model || ""),
     wireApi: String(ai.wireApi || ""),
     globalInstruction: String(ai.globalInstruction || ""),
+    unverifiedRunFillMode: ["confirm", "always", "manual"].includes(
+      String(ai.unverifiedRunFillMode || "").trim(),
+    )
+      ? String(ai.unverifiedRunFillMode || "").trim()
+      : "confirm",
     authMode,
   };
 }
@@ -1671,6 +1676,7 @@ function renderSettings() {
   $("#ai-oos-user-agent").value = ai.oosUserAgent;
   $("#ai-model").value = ai.model;
   $("#ai-global-instruction").value = ai.globalInstruction;
+  $("#unverified-run-fill-mode").value = ai.unverifiedRunFillMode;
   syncAiAuthModeUI();
 
   const container = $("#auth-profile-list");
@@ -2093,6 +2099,7 @@ function buildAiPayloadFromForm() {
     oosUserAgent: $("#ai-oos-user-agent").value.trim(),
     model: $("#ai-model").value.trim(),
     globalInstruction: $("#ai-global-instruction").value.trim(),
+    unverifiedRunFillMode: $("#unverified-run-fill-mode").value,
   };
 }
 
@@ -2299,11 +2306,16 @@ async function runAllCases(options = {}) {
     );
 
     if (onlyUnverified) {
-      const shouldFill = window.confirm(
-        `未校对用例已执行完成（通过 ${run.summary.passed} / 失败 ${run.summary.failed}）。\n是否立即按本次结果回填业务码？`,
-      );
-      if (shouldFill) {
+      const mode = String(state.settings?.ai?.unverifiedRunFillMode || "confirm");
+      if (mode === "always") {
         await fillBusinessCodes(run.id);
+      } else if (mode === "confirm") {
+        const shouldFill = window.confirm(
+          `未校对用例已执行完成（通过 ${run.summary.passed} / 失败 ${run.summary.failed}）。\n是否立即按本次结果回填业务码？`,
+        );
+        if (shouldFill) {
+          await fillBusinessCodes(run.id);
+        }
       }
     }
 
@@ -2479,6 +2491,7 @@ function bindSettingsDirtyInputs() {
     "#ai-oos-user-agent",
     "#ai-model",
     "#ai-global-instruction",
+    "#unverified-run-fill-mode",
   ];
 
   for (const id of ids) {

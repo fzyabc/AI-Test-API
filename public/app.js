@@ -7,6 +7,7 @@ const state = {
   selectedInterfaceId: "",
   selectedCaseId: "",
   selectedScenarioId: "",
+  selectedScenarioStepIndex: -1,
   selectedRunId: "",
   runAuthProfileId: "__case__",
   settingsDirty: false,
@@ -1146,33 +1147,72 @@ function getSelectedScenario() {
   );
 }
 
-function populateScenarioForm() {
-  const scenario = getSelectedScenario();
-  $("#scenario-id").value = scenario?.id || "";
-  $("#scenario-name").value = scenario?.name || "";
-  $("#scenario-description").value = scenario?.description || "";
-  $("#scenario-steps").value = JSON.stringify(scenario?.steps || [], null, 2);
-  const stepInterfaceSelect = $("#scenario-step-interface");
-  if (stepInterfaceSelect) {
-    const options = ['<option value="">请选择接口</option>']
-      .concat(state.interfaces.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} (${escapeHtml(item.method)} ${escapeHtml(item.path)})</option>`));
-    stepInterfaceSelect.innerHTML = options.join("");
+function getScenarioStepsFromEditor() {
+  const steps = safeJsonParse($("#scenario-steps").value, []);
+  return Array.isArray(steps) ? steps : [];
+}
+
+function syncScenarioStepsJson(steps, options = {}) {
+  $("#scenario-steps").value = JSON.stringify(steps || [], null, 2);
+  if (options.render !== false) {
+    renderScenarioStepList();
   }
+}
+
+function resetScenarioStepBuilder() {
+  [
+    "#scenario-step-name",
+    "#scenario-step-extract-name",
+    "#scenario-step-extract-path",
+    "#scenario-step-assert-path",
+    "#scenario-step-assert-expected",
+    "#scenario-step-body",
+    "#scenario-step-path-params",
+    "#scenario-step-headers",
+  ].forEach((selector) => {
+    const el = $(selector);
+    if (el) el.value = "";
+  });
+  if ($("#scenario-step-interface")) $("#scenario-step-interface").value = "";
   populateScenarioStepCaseOptions();
+  if ($("#scenario-step-case")) $("#scenario-step-case").value = "";
+  if ($("#scenario-step-assert-type")) $("#scenario-step-assert-type").value = "exists";
 }
 
-function populateScenarioStepCaseOptions() {
-  const interfaceId = $("#scenario-step-interface")?.value || "";
-  const caseSelect = $("#scenario-step-case");
-  if (!caseSelect) return;
-  const apiInterface = state.interfaces.find((item) => item.id === interfaceId);
-  const cases = apiInterface?.cases || [];
-  caseSelect.innerHTML = ['<option value="">请选择用例</option>']
-    .concat(cases.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`))
-    .join("");
+function fillScenarioStepBuilder(step = {}) {
+  $("#scenario-step-name").value = step.name || "";
+  $("#scenario-step-interface").value = step.interfaceId || "";
+  populateScenarioStepCaseOptions();
+  $("#scenario-step-case").value = step.caseId || "";
+  $("#scenario-step-path-params").value = JSON.stringify(step.request?.pathParams || {}, null, 2);
+  $("#scenario-step-headers").value = JSON.stringify(step.request?.headers || {}, null, 2);
+  const bodyValue = step.request && Object.prototype.hasOwnProperty.call(step.request, "body")
+    ? step.request.body
+    : "";
+  $("#scenario-step-body").value = typeof bodyValue === "string"
+    ? bodyValue
+    : bodyValue == null
+      ? ""
+      : JSON.stringify(bodyValue, null, 2);
+
+  const firstExtract = Array.isArray(step.extracts) ? step.extracts[0] : null;
+  $("#scenario-step-extract-name").value = firstExtract?.name || "";
+  $("#scenario-step-extract-path").value = firstExtract?.path || "";
+
+  const firstAssertion = Array.isArray(step.assertions) ? step.assertions[0] : null;
+  $("#scenario-step-assert-type").value = firstAssertion?.type || "exists";
+  $("#scenario-step-assert-path").value = firstAssertion?.path || "";
+  const expectedValue = firstAssertion && Object.prototype.hasOwnProperty.call(firstAssertion, "expected")
+    ? firstAssertion.expected
+    : "";
+  $("#scenario-step-assert-expected").value = typeof expectedValue === "string"
+    ? expectedValue
+    : expectedValue == null || expectedValue === ""
+      ? ""
+      : JSON.stringify(expectedValue);
 }
 
-function appendScenarioStepFromBuilder() {
+function buildScenarioStepFromBuilder() {
   const name = $("#scenario-step-name")?.value.trim();
   const interfaceId = $("#scenario-step-interface")?.value || "";
   const caseId = $("#scenario-step-case")?.value || "";
@@ -1187,13 +1227,7 @@ function appendScenarioStepFromBuilder() {
 
   if (!name || !interfaceId || !caseId) {
     showToast("步骤名、接口、用例不能为空", "error");
-    return;
-  }
-
-  const steps = safeJsonParse($("#scenario-steps").value, []);
-  if (!Array.isArray(steps)) {
-    showToast("当前步骤 JSON 非法", "error");
-    return;
+    return null;
   }
 
   const step = {
@@ -1221,24 +1255,141 @@ function appendScenarioStepFromBuilder() {
     }];
   }
 
-  steps.push(step);
-  $("#scenario-steps").value = JSON.stringify(steps, null, 2);
+  return step;
+}
 
-  [
-    "#scenario-step-name",
-    "#scenario-step-extract-name",
-    "#scenario-step-extract-path",
-    "#scenario-step-assert-path",
-    "#scenario-step-assert-expected",
-    "#scenario-step-body",
-    "#scenario-step-path-params",
-    "#scenario-step-headers",
-  ].forEach((selector) => {
-    const el = $(selector);
-    if (el) el.value = "";
+function populateScenarioForm() {
+  const scenario = getSelectedScenario();
+  $("#scenario-id").value = scenario?.id || "";
+  $("#scenario-name").value = scenario?.name || "";
+  $("#scenario-description").value = scenario?.description || "";
+  $("#scenario-steps").value = JSON.stringify(scenario?.steps || [], null, 2);
+  const stepInterfaceSelect = $("#scenario-step-interface");
+  if (stepInterfaceSelect) {
+    const options = ['<option value="">请选择接口</option>']
+      .concat(state.interfaces.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} (${escapeHtml(item.method)} ${escapeHtml(item.path)})</option>`));
+    stepInterfaceSelect.innerHTML = options.join("");
+  }
+  state.selectedScenarioStepIndex = -1;
+  resetScenarioStepBuilder();
+  renderScenarioStepList();
+}
+
+function populateScenarioStepCaseOptions() {
+  const interfaceId = $("#scenario-step-interface")?.value || "";
+  const caseSelect = $("#scenario-step-case");
+  if (!caseSelect) return;
+  const apiInterface = state.interfaces.find((item) => item.id === interfaceId);
+  const cases = apiInterface?.cases || [];
+  caseSelect.innerHTML = ['<option value="">请选择用例</option>']
+    .concat(cases.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`))
+    .join("");
+}
+
+function renderScenarioStepList() {
+  const container = $("#scenario-step-list");
+  if (!container) return;
+  const steps = getScenarioStepsFromEditor();
+  container.innerHTML = "";
+
+  if (!steps.length) {
+    container.innerHTML = '<div class="list-item muted">暂无步骤</div>';
+    return;
+  }
+
+  steps.forEach((step, index) => {
+    const apiInterface = state.interfaces.find((item) => item.id === step.interfaceId);
+    const testCase = apiInterface?.cases?.find((item) => item.id === step.caseId);
+    const row = document.createElement("div");
+    row.className = `list-item scenario-step-item ${index === state.selectedScenarioStepIndex ? "active" : ""}`;
+    row.innerHTML = `
+      <div class="row-between">
+        <strong>#${index + 1} ${escapeHtml(step.name || "未命名步骤")}</strong>
+        <div class="row scenario-step-actions">
+          <button type="button" class="secondary subtle-btn" data-step-move="up" data-step-index="${index}">上移</button>
+          <button type="button" class="secondary subtle-btn" data-step-move="down" data-step-index="${index}">下移</button>
+          <button type="button" class="danger subtle-btn" data-step-delete="${index}">删除</button>
+        </div>
+      </div>
+      <div class="muted">${escapeHtml(apiInterface?.name || step.interfaceId || "未知接口")} / ${escapeHtml(testCase?.name || step.caseId || "未知用例")}</div>
+      <div class="tiny-muted">提取 ${(step.extracts || []).length} 个变量 · 断言 ${(step.assertions || []).length} 条</div>
+    `;
+    row.onclick = (event) => {
+      if (event.target.closest("button")) return;
+      state.selectedScenarioStepIndex = index;
+      fillScenarioStepBuilder(step);
+      renderScenarioStepList();
+    };
+    container.appendChild(row);
   });
-  if ($("#scenario-step-assert-type")) $("#scenario-step-assert-type").value = "exists";
-  showToast("步骤已追加到 JSON");
+
+  container.querySelectorAll("[data-step-delete]").forEach((button) => {
+    button.onclick = (event) => {
+      event.stopPropagation();
+      const index = Number(button.dataset.stepDelete);
+      const steps = getScenarioStepsFromEditor();
+      steps.splice(index, 1);
+      if (state.selectedScenarioStepIndex === index) {
+        state.selectedScenarioStepIndex = -1;
+        resetScenarioStepBuilder();
+      } else if (state.selectedScenarioStepIndex > index) {
+        state.selectedScenarioStepIndex -= 1;
+      }
+      syncScenarioStepsJson(steps);
+    };
+  });
+
+  container.querySelectorAll("[data-step-move]").forEach((button) => {
+    button.onclick = (event) => {
+      event.stopPropagation();
+      const index = Number(button.dataset.stepIndex);
+      const direction = button.dataset.stepMove;
+      const nextIndex = direction === "up" ? index - 1 : index + 1;
+      const steps = getScenarioStepsFromEditor();
+      if (nextIndex < 0 || nextIndex >= steps.length) return;
+      [steps[index], steps[nextIndex]] = [steps[nextIndex], steps[index]];
+      if (state.selectedScenarioStepIndex === index) {
+        state.selectedScenarioStepIndex = nextIndex;
+      } else if (state.selectedScenarioStepIndex === nextIndex) {
+        state.selectedScenarioStepIndex = index;
+      }
+      syncScenarioStepsJson(steps);
+    };
+  });
+}
+
+function appendScenarioStepFromBuilder() {
+  const step = buildScenarioStepFromBuilder();
+  if (!step) return;
+
+  const steps = getScenarioStepsFromEditor();
+  steps.push(step);
+  state.selectedScenarioStepIndex = steps.length - 1;
+  syncScenarioStepsJson(steps);
+  fillScenarioStepBuilder(step);
+  showToast("步骤已追加到场景");
+}
+
+function saveScenarioStepEdit() {
+  const step = buildScenarioStepFromBuilder();
+  if (!step) return;
+  const steps = getScenarioStepsFromEditor();
+  if (state.selectedScenarioStepIndex < 0 || state.selectedScenarioStepIndex >= steps.length) {
+    showToast("请先在步骤列表选择一个步骤", "error");
+    return;
+  }
+  steps[state.selectedScenarioStepIndex] = {
+    ...steps[state.selectedScenarioStepIndex],
+    ...step,
+  };
+  syncScenarioStepsJson(steps);
+  showToast("步骤已更新");
+}
+
+function cancelScenarioStepEdit() {
+  state.selectedScenarioStepIndex = -1;
+  resetScenarioStepBuilder();
+  renderScenarioStepList();
 }
 
 function renderScenarioList() {
@@ -1263,6 +1414,7 @@ function renderScenarioList() {
     `;
     row.onclick = () => {
       state.selectedScenarioId = scenario.id;
+      state.selectedScenarioStepIndex = -1;
       renderScenarioList();
       populateScenarioForm();
     };
@@ -1334,8 +1486,11 @@ async function runSelectedScenario() {
     method: "POST",
     body: JSON.stringify({}),
   });
-  $("#scenario-run-meta").textContent = `场景 ${result.scenarioName} | 开始 ${formatBeijingTime(result.startedAt)} | 通过 ${result.summary.passed} / 失败 ${result.summary.failed}`;
+  $("#scenario-run-meta").textContent = `场景 ${result.scenario?.name || result.scenarioName} | 开始 ${formatBeijingTime(result.startedAt)} | 通过 ${result.summary.passed} / 失败 ${result.summary.failed}`;
   renderScenarioRunTable(result.results || []);
+  await loadRunsOnly();
+  renderLatestRun();
+  renderRunList();
   showToast(`场景执行完成: 通过 ${result.summary.passed} / 失败 ${result.summary.failed}`);
 }
 
@@ -2292,6 +2447,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   $("#new-scenario-btn").onclick = () => {
     state.selectedScenarioId = "";
+    state.selectedScenarioStepIndex = -1;
     populateScenarioForm();
   };
 
@@ -2301,6 +2457,18 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   $("#append-scenario-step-btn").onclick = () => {
     appendScenarioStepFromBuilder();
+  };
+
+  $("#save-scenario-step-btn").onclick = () => {
+    saveScenarioStepEdit();
+  };
+
+  $("#cancel-scenario-step-btn").onclick = () => {
+    cancelScenarioStepEdit();
+  };
+
+  $("#scenario-steps").oninput = () => {
+    renderScenarioStepList();
   };
 
   $("#run-scenario-btn").onclick = async () => {

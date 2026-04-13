@@ -199,50 +199,62 @@
               <label>场景名称<input id="scenario-name" type="text" /></label>
               <label>描述<textarea id="scenario-description"></textarea></label>
 
-              <div class="card scenario-builder-card">
-                <h4>快速追加步骤</h4>
-                <label>步骤名称<input id="scenario-step-name" type="text" placeholder="例如：查询用户详情" /></label>
-                <label>接口
-                  <select id="scenario-step-interface"></select>
-                </label>
-                <label>用例
-                  <select id="scenario-step-case"></select>
-                </label>
-                <label>路径参数(JSON)<textarea id="scenario-step-path-params" placeholder='{"userId":"{{userId}}"}'></textarea></label>
-                <label>Headers(JSON)<textarea id="scenario-step-headers" placeholder='{"X-Trace-Id":"demo"}'></textarea></label>
-                <label>请求体(JSON 或纯文本)<textarea id="scenario-step-body" placeholder='{"seed":"demo-{{seed}}"}'></textarea></label>
-                <div class="split scenario-inline-split">
-                  <div>
-                    <h4>变量提取</h4>
-                    <label>变量名<input id="scenario-step-extract-name" type="text" placeholder="userId" /></label>
-                    <label>提取路径<input id="scenario-step-extract-path" type="text" placeholder="$.data.userId" /></label>
+              <div class="split scenario-editor-layout">
+                <div class="card scenario-step-list-card">
+                  <div class="row-between">
+                    <h4>步骤列表</h4>
+                    <div class="tiny-muted">可选中、编辑、上下移动、删除</div>
                   </div>
-                  <div>
-                    <h4>断言</h4>
-                    <label>断言类型
-                      <select id="scenario-step-assert-type">
-                        <option value="exists">exists</option>
-                        <option value="equals">equals</option>
-                        <option value="contains">contains</option>
-                        <option value="notEmpty">notEmpty</option>
-                        <option value="regex">regex</option>
-                        <option value="length">length</option>
-                        <option value="gt">gt</option>
-                        <option value="gte">gte</option>
-                        <option value="lt">lt</option>
-                        <option value="lte">lte</option>
-                      </select>
-                    </label>
-                    <label>断言路径<input id="scenario-step-assert-path" type="text" placeholder="$.data.id" /></label>
-                    <label>期望值<input id="scenario-step-assert-expected" type="text" placeholder='例如：123 / "ok" / ^user-' /></label>
-                  </div>
+                  <div id="scenario-step-list" class="list compact"></div>
                 </div>
-                <div class="row">
-                  <button id="append-scenario-step-btn" type="button" class="secondary">追加步骤到 JSON</button>
+
+                <div class="card scenario-builder-card">
+                  <h4>步骤编辑器</h4>
+                  <label>步骤名称<input id="scenario-step-name" type="text" placeholder="例如：查询用户详情" /></label>
+                  <label>接口
+                    <select id="scenario-step-interface"></select>
+                  </label>
+                  <label>用例
+                    <select id="scenario-step-case"></select>
+                  </label>
+                  <label>路径参数(JSON)<textarea id="scenario-step-path-params" placeholder='{"userId":"{{userId}}"}'></textarea></label>
+                  <label>Headers(JSON)<textarea id="scenario-step-headers" placeholder='{"X-Trace-Id":"demo"}'></textarea></label>
+                  <label>请求体(JSON 或纯文本)<textarea id="scenario-step-body" placeholder='{"seed":"demo-{{seed}}"}'></textarea></label>
+                  <div class="split scenario-inline-split">
+                    <div>
+                      <h4>变量提取</h4>
+                      <label>变量名<input id="scenario-step-extract-name" type="text" placeholder="userId" /></label>
+                      <label>提取路径<input id="scenario-step-extract-path" type="text" placeholder="$.data.userId" /></label>
+                    </div>
+                    <div>
+                      <h4>断言</h4>
+                      <label>断言类型
+                        <select id="scenario-step-assert-type">
+                          <option value="exists">exists</option>
+                          <option value="equals">equals</option>
+                          <option value="contains">contains</option>
+                          <option value="notEmpty">notEmpty</option>
+                          <option value="regex">regex</option>
+                          <option value="length">length</option>
+                          <option value="gt">gt</option>
+                          <option value="gte">gte</option>
+                          <option value="lt">lt</option>
+                          <option value="lte">lte</option>
+                        </select>
+                      </label>
+                      <label>断言路径<input id="scenario-step-assert-path" type="text" placeholder="$.data.id" /></label>
+                      <label>期望值<input id="scenario-step-assert-expected" type="text" placeholder='例如：123 / "ok" / ^user-' /></label>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <button id="append-scenario-step-btn" type="button" class="secondary">新增步骤</button>
+                    <button id="save-scenario-step-btn" type="button" class="primary">保存当前编辑步骤</button>
+                    <button id="cancel-scenario-step-btn" type="button" class="secondary">取消选中</button>
+                  </div>
                 </div>
               </div>
 
-              <label>步骤(JSON)
+              <label>步骤(JSON，高级模式)
                 <textarea id="scenario-steps" rows="18" placeholder='[
   {
     "name": "创建用户",

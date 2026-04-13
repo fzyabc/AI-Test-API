@@ -274,9 +274,24 @@ ul { padding-left: 18px; }
 .retest-badge { margin-top: 4px; font-size: 12px; font-weight: 700; }
 .retest-status-line { margin-top: 8px; font-size: 13px; }
 
+.scenario-editor-layout {
+  grid-template-columns: 320px 1fr;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.scenario-step-list-card,
 .scenario-builder-card {
   background: #fff8ef;
   margin-top: 14px;
+}
+
+.scenario-step-item {
+  cursor: pointer;
+}
+
+.scenario-step-actions {
+  margin-top: 0;
 }
 
 .scenario-inline-split {

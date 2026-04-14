@@ -463,6 +463,7 @@ function registerApiRoutes(app) {
         id: scenarioRun.id,
         startedAt: scenarioRun.startedAt,
         finishedAt: scenarioRun.finishedAt,
+        durationMs: scenarioRun.durationMs,
         summary: scenarioRun.summary,
         executionMode: "scenario_runner",
         runInstruction: "",
@@ -491,6 +492,7 @@ function registerApiRoutes(app) {
           id: scenario.id,
           name: scenario.name,
         },
+        stopReason: scenarioRun.stopReason || "",
         results: scenarioRun.results,
         variables: scenarioRun.variables,
         ai: {

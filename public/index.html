@@ -255,12 +255,23 @@
 
                 <div class="card scenario-builder-card">
                   <h4>步骤编辑器</h4>
+                  <input id="scenario-step-id" type="hidden" />
                   <label>步骤名称<input id="scenario-step-name" type="text" placeholder="例如：查询用户详情" /></label>
                   <label>接口
                     <select id="scenario-step-interface"></select>
                   </label>
                   <label>用例
                     <select id="scenario-step-case"></select>
+                  </label>
+                  <label>失败策略
+                    <select id="scenario-step-on-failure">
+                      <option value="stop">stop - 失败即停止</option>
+                      <option value="continue">continue - 失败后继续下一步</option>
+                      <option value="jump">jump - 失败后跳到指定步骤</option>
+                    </select>
+                  </label>
+                  <label id="scenario-step-next-step-wrap" style="display:none">失败跳转目标
+                    <select id="scenario-step-next-step-id"></select>
                   </label>
                   <label>路径参数(JSON)<textarea id="scenario-step-path-params" placeholder='{"userId":"{{userId}}"}'></textarea></label>
                   <label>Headers(JSON)<textarea id="scenario-step-headers" placeholder='{"X-Trace-Id":"demo"}'></textarea></label>
@@ -302,18 +313,31 @@
               <label>步骤(JSON，高级模式)
                 <textarea id="scenario-steps" rows="18" placeholder='[
   {
+    "id": "step-create-user",
     "name": "创建用户",
     "interfaceId": "xxx",
     "caseId": "yyy",
+    "onFailure": "stop",
     "request": {
       "body": { "name": "demo-{{seed}}" }
     },
     "extracts": [
-      { "name": "userId", "source": "response.bodyJson", "path": "$.data.id" }
+      { "name": "flow.userId", "source": "response.bodyJson", "path": "$.data.id" }
     ],
     "assertions": [
       { "type": "exists", "source": "response.bodyJson", "path": "$.data.id" }
     ]
+  },
+  {
+    "id": "step-query-user",
+    "name": "查询用户",
+    "interfaceId": "xxx-query",
+    "caseId": "yyy-query",
+    "onFailure": "jump",
+    "nextStepId": "step-cleanup",
+    "request": {
+      "pathParams": { "userId": "{{flow.userId}}" }
+    }
   }
 ]'></textarea>
               </label>

@@ -67,6 +67,13 @@ function formatBeijingTime(value) {
   return `${beijingFormatter.format(date).replace(",", "")} UTC+8`;
 }
 
+function formatDuration(ms) {
+  const value = Number(ms);
+  if (!Number.isFinite(value) || value < 0) return "-";
+  if (value < 1000) return `${Math.round(value)}ms`;
+  return `${(value / 1000).toFixed(value >= 10000 ? 0 : 2)}s`;
+}
+
 function formatDisplayValue(value) {
   if (value == null || value === "") return "-";
   if (typeof value === "string") {
@@ -272,11 +279,35 @@ function buildResultDetailsHtml(item) {
   const requestLine = [item.method, item.url || item.path]
     .filter(Boolean)
     .join(" ");
+  const timingLine = [
+    item.startedAt ? `开始 ${formatBeijingTime(item.startedAt)}` : "",
+    item.finishedAt ? `结束 ${formatBeijingTime(item.finishedAt)}` : "",
+    item.durationMs != null ? `耗时 ${formatDuration(item.durationMs)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" | ");
+  const extractedVariablesText =
+    item.extractedVariables && Object.keys(item.extractedVariables).length
+      ? formatDisplayValue(item.extractedVariables)
+      : "-";
+  const variablesSnapshotText =
+    item.variablesSnapshot && Object.keys(item.variablesSnapshot).length
+      ? formatDisplayValue(item.variablesSnapshot)
+      : "-";
+  const flowLine = [
+    item.onFailure ? `失败策略: ${item.onFailure}` : "",
+    item.nextStepId ? `失败跳转: ${item.nextStepId}` : "",
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
   return `
     <div class="result-summary-text">${escapeHtml(item.assertionSummary || "")}</div>
     <details class="result-details">
       <summary>查看请求与响应详情</summary>
       <div class="result-detail-meta">${escapeHtml(requestLine || "-")}</div>
+      ${timingLine ? `<div class="result-detail-meta">${escapeHtml(timingLine)}</div>` : ""}
+      ${flowLine ? `<div class="result-detail-meta">${escapeHtml(flowLine)}</div>` : ""}
       <div class="result-detail-block">
         <div class="detail-label">请求 Headers</div>
         <pre>${escapeHtml(formatDisplayValue(item.request?.headers))}</pre>
@@ -288,6 +319,14 @@ function buildResultDetailsHtml(item) {
       <div class="result-detail-block">
         <div class="detail-label">响应结果</div>
         <pre>${escapeHtml(buildResponseText(item.response))}</pre>
+      </div>
+      <div class="result-detail-block">
+        <div class="detail-label">提取变量（当前步骤）</div>
+        <pre>${escapeHtml(extractedVariablesText)}</pre>
+      </div>
+      <div class="result-detail-block">
+        <div class="detail-label">变量快照（执行后）</div>
+        <pre>${escapeHtml(variablesSnapshotText)}</pre>
       </div>
       <div class="result-detail-block">
         <div class="detail-label">自动重试记录</div>
@@ -305,10 +344,17 @@ function renderScenarioRunTable(results) {
 
   for (const item of results || []) {
     const tr = document.createElement("tr");
+    const statusClass = item.skipped
+      ? ""
+      : item.pass
+        ? "status-pass"
+        : "status-fail";
+    const statusText = item.skipped ? "跳过" : item.pass ? "通过" : "失败";
+    const stepLabel = `${item.executionIndex ? `#${item.executionIndex} ` : ""}${item.stepName || item.caseName || ""}`;
     tr.innerHTML = `
-      <td>${escapeHtml(item.stepName || item.caseName || "")}</td>
+      <td>${escapeHtml(stepLabel)}</td>
       <td>${escapeHtml(item.interfaceName || item.interfaceId || "")}</td>
-      <td class="${item.pass ? "status-pass" : "status-fail"}">${item.skipped ? "跳过" : item.pass ? "通过" : "失败"}</td>
+      <td class="${statusClass}">${statusText}</td>
       <td class="result-detail-cell">${buildResultDetailsHtml(item)}</td>
     `;
     tbody.appendChild(tr);
@@ -1375,6 +1421,7 @@ function resetScenarioStepBuilder() {
     "#scenario-step-body",
     "#scenario-step-path-params",
     "#scenario-step-headers",
+    "#scenario-step-next-step-id",
   ].forEach((selector) => {
     const el = $(selector);
     if (el) el.value = "";
@@ -1383,9 +1430,36 @@ function resetScenarioStepBuilder() {
   populateScenarioStepCaseOptions();
   if ($("#scenario-step-case")) $("#scenario-step-case").value = "";
   if ($("#scenario-step-assert-type")) $("#scenario-step-assert-type").value = "exists";
+  if ($("#scenario-step-on-failure")) $("#scenario-step-on-failure").value = "stop";
+  syncScenarioJumpTargetVisibility();
+}
+
+function syncScenarioJumpTargetVisibility() {
+  const mode = $("#scenario-step-on-failure")?.value || "stop";
+  const wrap = $("#scenario-step-next-step-wrap");
+  if (!wrap) return;
+  wrap.style.display = mode === "jump" ? "" : "none";
+}
+
+function populateScenarioJumpTargetOptions(currentStepId = "") {
+  const select = $("#scenario-step-next-step-id");
+  if (!select) return;
+  const steps = getScenarioStepsFromEditor();
+  const currentValue = select.value;
+  select.innerHTML = ['<option value="">请选择跳转目标</option>']
+    .concat(
+      steps
+        .filter((item) => String(item?.id || "") && String(item?.id || "") !== String(currentStepId || ""))
+        .map((item, index) => `<option value="${escapeHtml(item.id)}">#${index + 1} ${escapeHtml(item.name || item.id)}</option>`),
+    )
+    .join("");
+  if ([...select.options].some((item) => item.value === currentValue)) {
+    select.value = currentValue;
+  }
 }
 
 function fillScenarioStepBuilder(step = {}) {
+  $("#scenario-step-id").value = step.id || "";
   $("#scenario-step-name").value = step.name || "";
   $("#scenario-step-interface").value = step.interfaceId || "";
   populateScenarioStepCaseOptions();
@@ -1416,9 +1490,15 @@ function fillScenarioStepBuilder(step = {}) {
     : expectedValue == null || expectedValue === ""
       ? ""
       : JSON.stringify(expectedValue);
+
+  $("#scenario-step-on-failure").value = step.onFailure || (step.stopOnFailure === false ? "continue" : "stop");
+  populateScenarioJumpTargetOptions(step.id || "");
+  $("#scenario-step-next-step-id").value = step.nextStepId || "";
+  syncScenarioJumpTargetVisibility();
 }
 
 function buildScenarioStepFromBuilder() {
+  const id = $("#scenario-step-id")?.value.trim();
   const name = $("#scenario-step-name")?.value.trim();
   const interfaceId = $("#scenario-step-interface")?.value || "";
   const caseId = $("#scenario-step-case")?.value || "";
@@ -1430,17 +1510,30 @@ function buildScenarioStepFromBuilder() {
   const requestBodyRaw = $("#scenario-step-body")?.value.trim();
   const requestPathParamsRaw = $("#scenario-step-path-params")?.value.trim();
   const requestHeadersRaw = $("#scenario-step-headers")?.value.trim();
+  const onFailure = $("#scenario-step-on-failure")?.value || "stop";
+  const nextStepId = $("#scenario-step-next-step-id")?.value || "";
 
   if (!name || !interfaceId || !caseId) {
     showToast("步骤名、接口、用例不能为空", "error");
     return null;
   }
 
+  if (onFailure === "jump" && !nextStepId) {
+    showToast("失败策略为 jump 时，必须选择跳转目标", "error");
+    return null;
+  }
+
   const step = {
+    id: id || `step-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     name,
     interfaceId,
     caseId,
+    onFailure,
   };
+
+  if (onFailure === "jump") {
+    step.nextStepId = nextStepId;
+  }
 
   const request = {};
   if (requestPathParamsRaw) request.pathParams = safeJsonParse(requestPathParamsRaw, {});
@@ -1478,6 +1571,7 @@ function populateScenarioForm() {
   }
   state.selectedScenarioStepIndex = -1;
   resetScenarioStepBuilder();
+  populateScenarioJumpTargetOptions();
   renderScenarioStepList();
 }
 
@@ -1518,7 +1612,8 @@ function renderScenarioStepList() {
         </div>
       </div>
       <div class="muted">${escapeHtml(apiInterface?.name || step.interfaceId || "未知接口")} / ${escapeHtml(testCase?.name || step.caseId || "未知用例")}</div>
-      <div class="tiny-muted">提取 ${(step.extracts || []).length} 个变量 · 断言 ${(step.assertions || []).length} 条</div>
+      <div class="tiny-muted">ID ${escapeHtml(step.id || "-")} · 提取 ${(step.extracts || []).length} 个变量 · 断言 ${(step.assertions || []).length} 条</div>
+      <div class="tiny-muted">失败策略 ${escapeHtml(step.onFailure || (step.stopOnFailure === false ? "continue" : "stop"))}${step.nextStepId ? ` → ${escapeHtml(step.nextStepId)}` : ""}</div>
     `;
     row.onclick = (event) => {
       if (event.target.closest("button")) return;
@@ -1542,6 +1637,7 @@ function renderScenarioStepList() {
         state.selectedScenarioStepIndex -= 1;
       }
       syncScenarioStepsJson(steps);
+      populateScenarioJumpTargetOptions();
     };
   });
 
@@ -1560,6 +1656,7 @@ function renderScenarioStepList() {
         state.selectedScenarioStepIndex = index;
       }
       syncScenarioStepsJson(steps);
+      populateScenarioJumpTargetOptions();
     };
   });
 }
@@ -1572,6 +1669,7 @@ function appendScenarioStepFromBuilder() {
   steps.push(step);
   state.selectedScenarioStepIndex = steps.length - 1;
   syncScenarioStepsJson(steps);
+  populateScenarioJumpTargetOptions(step.id);
   fillScenarioStepBuilder(step);
   showToast("步骤已追加到场景");
 }
@@ -1589,6 +1687,7 @@ function saveScenarioStepEdit() {
     ...step,
   };
   syncScenarioStepsJson(steps);
+  populateScenarioJumpTargetOptions(step.id);
   showToast("步骤已更新");
 }
 
@@ -1692,7 +1791,7 @@ async function runSelectedScenario() {
     method: "POST",
     body: JSON.stringify({}),
   });
-  $("#scenario-run-meta").textContent = `场景 ${result.scenario?.name || result.scenarioName} | 开始 ${formatBeijingTime(result.startedAt)} | 通过 ${result.summary.passed} / 失败 ${result.summary.failed}`;
+  $("#scenario-run-meta").textContent = `场景 ${result.scenario?.name || result.scenarioName} | 开始 ${formatBeijingTime(result.startedAt)} | 耗时 ${formatDuration(result.durationMs)} | 执行 ${result.summary.executed} / 总数 ${result.summary.total} | 通过 ${result.summary.passed} / 失败 ${result.summary.failed} / 跳过 ${result.summary.skipped}${result.stopReason ? ` | 停止原因 ${result.stopReason}` : ""}`;
   renderScenarioRunTable(result.results || []);
   await loadRunsOnly();
   renderLatestRun();
@@ -3085,6 +3184,11 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   $("#scenario-step-interface").onchange = () => {
     populateScenarioStepCaseOptions();
+  };
+
+  $("#scenario-step-on-failure").onchange = () => {
+    syncScenarioJumpTargetVisibility();
+    populateScenarioJumpTargetOptions($("#scenario-step-id")?.value || "");
   };
 
   $("#append-scenario-step-btn").onclick = () => {

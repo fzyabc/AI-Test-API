@@ -163,9 +163,10 @@ async function main() {
               name: '创建用户',
               interfaceId: 'create-user-api',
               caseId: 'create-user-case',
+              onFailure: 'stop',
               request: { body: { seed: 'abc123' } },
               extracts: [
-                { name: 'userId', source: 'response.bodyJson', path: '$.data.userId' },
+                { name: 'flow.userId', source: 'response.bodyJson', path: '$.data.userId' },
               ],
               assertions: [
                 { type: 'exists', source: 'response.bodyJson', path: '$.data.userId' },
@@ -176,7 +177,8 @@ async function main() {
               name: '查询用户',
               interfaceId: 'get-user-api',
               caseId: 'get-user-case',
-              request: { pathParams: { userId: '{{userId}}' } },
+              onFailure: 'stop',
+              request: { pathParams: { userId: '{{flow.userId}}' } },
               assertions: [
                 { type: 'equals', source: 'response.bodyJson', path: '$.data.id', expected: 'user-abc123' },
                 { type: 'regex', source: 'response.bodyJson', path: '$.data.id', expected: '^user-' },
@@ -186,27 +188,92 @@ async function main() {
             },
           ],
         },
+        {
+          id: 'scenario-2',
+          name: 'Jump on failure',
+          description: 'jump branch smoke',
+          steps: [
+            {
+              id: 'jump-step-1',
+              name: '创建用户并提取',
+              interfaceId: 'create-user-api',
+              caseId: 'create-user-case',
+              onFailure: 'stop',
+              request: { body: { seed: 'jump01' } },
+              extracts: [
+                { name: 'flow.userId', source: 'response.bodyJson', path: '$.data.userId' },
+              ],
+            },
+            {
+              id: 'jump-step-2',
+              name: '故意失败后跳清理',
+              interfaceId: 'get-user-api',
+              caseId: 'get-user-case',
+              onFailure: 'jump',
+              nextStepId: 'jump-step-4',
+              request: { pathParams: { userId: '{{flow.userId}}' } },
+              assertions: [
+                { type: 'equals', source: 'response.bodyJson', path: '$.data.id', expected: 'wrong-id' },
+              ],
+            },
+            {
+              id: 'jump-step-3',
+              name: '这一段应被跳过',
+              interfaceId: 'get-user-api',
+              caseId: 'get-user-case',
+              onFailure: 'stop',
+              request: { pathParams: { userId: '{{flow.userId}}' } },
+            },
+            {
+              id: 'jump-step-4',
+              name: '跳转后的收尾校验',
+              interfaceId: 'get-user-api',
+              caseId: 'get-user-case',
+              onFailure: 'stop',
+              request: { pathParams: { userId: '{{flow.userId}}' } },
+              assertions: [
+                { type: 'equals', source: 'response.bodyJson', path: '$.data.id', expected: 'user-jump01' },
+              ],
+            },
+          ],
+        },
       ],
     }, null, 2));
 
     await waitForServer(`http://127.0.0.1:${appPort}/api/settings`);
 
-    const response = await fetch(`http://127.0.0.1:${appPort}/api/scenarios/scenario-1/run`, {
+    const response1 = await fetch(`http://127.0.0.1:${appPort}/api/scenarios/scenario-1/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
 
-    const result = await response.json();
-    if (!response.ok) throw new Error(`scenario run failed: ${JSON.stringify(result)}`);
-    if (result.summary?.total !== 2 || result.summary?.passed !== 2 || result.summary?.failed !== 0) {
-      throw new Error(`unexpected summary: ${JSON.stringify(result.summary)}`);
+    const result1 = await response1.json();
+    if (!response1.ok) throw new Error(`scenario-1 run failed: ${JSON.stringify(result1)}`);
+    if (result1.summary?.total !== 2 || result1.summary?.executed !== 2 || result1.summary?.passed !== 2 || result1.summary?.failed !== 0 || result1.summary?.skipped !== 0) {
+      throw new Error(`unexpected scenario-1 summary: ${JSON.stringify(result1.summary)}`);
     }
-    if (result.variables?.userId !== 'user-abc123') {
-      throw new Error(`unexpected extracted variable: ${JSON.stringify(result.variables)}`);
+    if (result1.variables?.flow?.userId !== 'user-abc123') {
+      throw new Error(`unexpected extracted variable: ${JSON.stringify(result1.variables)}`);
     }
 
-    console.log(JSON.stringify({ ok: true, summary: result.summary, variables: result.variables }, null, 2));
+    const response2 = await fetch(`http://127.0.0.1:${appPort}/api/scenarios/scenario-2/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+
+    const result2 = await response2.json();
+    if (!response2.ok) throw new Error(`scenario-2 run failed: ${JSON.stringify(result2)}`);
+    if (result2.summary?.total !== 4 || result2.summary?.executed !== 3 || result2.summary?.passed !== 2 || result2.summary?.failed !== 1 || result2.summary?.skipped !== 1) {
+      throw new Error(`unexpected scenario-2 summary: ${JSON.stringify(result2.summary)}`);
+    }
+    const executedNames = (result2.results || []).filter((item) => !item.skipped).map((item) => item.stepName);
+    if (executedNames.join('|') !== '创建用户并提取|故意失败后跳清理|跳转后的收尾校验') {
+      throw new Error(`unexpected execution path: ${executedNames.join('|')}`);
+    }
+
+    console.log(JSON.stringify({ ok: true, scenario1: result1.summary, scenario2: result2.summary, variables: result1.variables }, null, 2));
   } finally {
     app.kill('SIGTERM');
     await new Promise((resolve) => app.once('exit', resolve));

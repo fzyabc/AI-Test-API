@@ -1413,11 +1413,8 @@ function syncScenarioStepsJson(steps, options = {}) {
 
 function resetScenarioStepBuilder() {
   [
+    "#scenario-step-id",
     "#scenario-step-name",
-    "#scenario-step-extract-name",
-    "#scenario-step-extract-path",
-    "#scenario-step-assert-path",
-    "#scenario-step-assert-expected",
     "#scenario-step-body",
     "#scenario-step-path-params",
     "#scenario-step-headers",
@@ -1429,8 +1426,8 @@ function resetScenarioStepBuilder() {
   if ($("#scenario-step-interface")) $("#scenario-step-interface").value = "";
   populateScenarioStepCaseOptions();
   if ($("#scenario-step-case")) $("#scenario-step-case").value = "";
-  if ($("#scenario-step-assert-type")) $("#scenario-step-assert-type").value = "exists";
   if ($("#scenario-step-on-failure")) $("#scenario-step-on-failure").value = "stop";
+  renderScenarioBuilderSubEditors([], []);
   syncScenarioJumpTargetVisibility();
 }
 
@@ -1458,6 +1455,141 @@ function populateScenarioJumpTargetOptions(currentStepId = "") {
   }
 }
 
+function buildScenarioExtractCard(extract = {}, index = 0) {
+  return `
+    <div class="scenario-subitem-card" data-extract-index="${index}">
+      <div class="row-between">
+        <h5>提取 #${index + 1}</h5>
+        <button type="button" class="danger subtle-btn" data-remove-extract="${index}">删除</button>
+      </div>
+      <label>变量名<input type="text" data-extract-field="name" value="${escapeHtml(extract.name || "")}" placeholder="flow.userId" /></label>
+      <label>来源
+        <select data-extract-field="source">
+          <option value="response.bodyJson" ${extract.source === "response.bodyJson" || !extract.source ? "selected" : ""}>response.bodyJson</option>
+          <option value="response.bodyText" ${extract.source === "response.bodyText" ? "selected" : ""}>response.bodyText</option>
+          <option value="response.status" ${extract.source === "response.status" ? "selected" : ""}>response.status</option>
+          <option value="response" ${extract.source === "response" ? "selected" : ""}>response</option>
+          <option value="request" ${extract.source === "request" ? "selected" : ""}>request</option>
+        </select>
+      </label>
+      <label>提取路径<input type="text" data-extract-field="path" value="${escapeHtml(extract.path || "$")}" placeholder="$.data.userId" /></label>
+      <label>默认值(JSON/文本)<input type="text" data-extract-field="defaultValue" value="${escapeHtml(extract.defaultValue == null ? "" : typeof extract.defaultValue === "string" ? extract.defaultValue : JSON.stringify(extract.defaultValue))}" placeholder='可选："guest" / 0 / true' /></label>
+    </div>
+  `;
+}
+
+function buildScenarioAssertionCard(assertion = {}, index = 0) {
+  return `
+    <div class="scenario-subitem-card" data-assertion-index="${index}">
+      <div class="row-between">
+        <h5>断言 #${index + 1}</h5>
+        <button type="button" class="danger subtle-btn" data-remove-assertion="${index}">删除</button>
+      </div>
+      <label>断言类型
+        <select data-assertion-field="type">
+          <option value="exists" ${assertion.type === "exists" || !assertion.type ? "selected" : ""}>exists</option>
+          <option value="equals" ${assertion.type === "equals" ? "selected" : ""}>equals</option>
+          <option value="contains" ${assertion.type === "contains" ? "selected" : ""}>contains</option>
+          <option value="notEmpty" ${assertion.type === "notEmpty" ? "selected" : ""}>notEmpty</option>
+          <option value="regex" ${assertion.type === "regex" ? "selected" : ""}>regex</option>
+          <option value="length" ${assertion.type === "length" ? "selected" : ""}>length</option>
+          <option value="gt" ${assertion.type === "gt" ? "selected" : ""}>gt</option>
+          <option value="gte" ${assertion.type === "gte" ? "selected" : ""}>gte</option>
+          <option value="lt" ${assertion.type === "lt" ? "selected" : ""}>lt</option>
+          <option value="lte" ${assertion.type === "lte" ? "selected" : ""}>lte</option>
+        </select>
+      </label>
+      <label>来源
+        <select data-assertion-field="source">
+          <option value="response.bodyJson" ${assertion.source === "response.bodyJson" || !assertion.source ? "selected" : ""}>response.bodyJson</option>
+          <option value="response.bodyText" ${assertion.source === "response.bodyText" ? "selected" : ""}>response.bodyText</option>
+          <option value="response.status" ${assertion.source === "response.status" ? "selected" : ""}>response.status</option>
+          <option value="response" ${assertion.source === "response" ? "selected" : ""}>response</option>
+          <option value="request" ${assertion.source === "request" ? "selected" : ""}>request</option>
+        </select>
+      </label>
+      <label>断言路径<input type="text" data-assertion-field="path" value="${escapeHtml(assertion.path || "$")}" placeholder="$.data.id" /></label>
+      <label>期望值(JSON/文本)<input type="text" data-assertion-field="expected" value="${escapeHtml(assertion.expected == null ? "" : typeof assertion.expected === "string" ? assertion.expected : JSON.stringify(assertion.expected))}" placeholder='例如：123 / "ok" / ^user-' /></label>
+      <label>失败提示<input type="text" data-assertion-field="message" value="${escapeHtml(assertion.message || "")}" placeholder="可选：自定义失败提示" /></label>
+    </div>
+  `;
+}
+
+function readScenarioExtractsFromBuilder() {
+  return [...document.querySelectorAll("#scenario-step-extract-list [data-extract-index]")]
+    .map((card) => {
+      const readField = (name) => card.querySelector(`[data-extract-field="${name}"]`)?.value ?? "";
+      const name = String(readField("name")).trim();
+      const path = String(readField("path")).trim();
+      const source = String(readField("source")).trim() || "response.bodyJson";
+      const defaultValueRaw = String(readField("defaultValue")).trim();
+      if (!name) return null;
+      const next = {
+        name,
+        source,
+        path: path || "$",
+      };
+      if (defaultValueRaw) {
+        next.defaultValue = safeJsonParse(defaultValueRaw, defaultValueRaw);
+      }
+      return next;
+    })
+    .filter(Boolean);
+}
+
+function readScenarioAssertionsFromBuilder() {
+  return [...document.querySelectorAll("#scenario-step-assertion-list [data-assertion-index]")]
+    .map((card) => {
+      const readField = (name) => card.querySelector(`[data-assertion-field="${name}"]`)?.value ?? "";
+      const type = String(readField("type")).trim() || "exists";
+      const source = String(readField("source")).trim() || "response.bodyJson";
+      const path = String(readField("path")).trim();
+      const expectedRaw = String(readField("expected")).trim();
+      const message = String(readField("message")).trim();
+      if (!path) return null;
+      const next = {
+        type,
+        source,
+        path,
+      };
+      if (expectedRaw) next.expected = safeJsonParse(expectedRaw, expectedRaw);
+      if (message) next.message = message;
+      return next;
+    })
+    .filter(Boolean);
+}
+
+function renderScenarioBuilderSubEditors(extracts = [], assertions = []) {
+  const extractList = $("#scenario-step-extract-list");
+  const assertionList = $("#scenario-step-assertion-list");
+  if (extractList) {
+    extractList.innerHTML = extracts.length
+      ? extracts.map((item, index) => buildScenarioExtractCard(item, index)).join("")
+      : '<div class="list-item muted">暂无提取变量</div>';
+  }
+  if (assertionList) {
+    assertionList.innerHTML = assertions.length
+      ? assertions.map((item, index) => buildScenarioAssertionCard(item, index)).join("")
+      : '<div class="list-item muted">暂无断言</div>';
+  }
+
+  document.querySelectorAll("[data-remove-extract]").forEach((button) => {
+    button.onclick = () => {
+      const list = readScenarioExtractsFromBuilder();
+      list.splice(Number(button.dataset.removeExtract), 1);
+      renderScenarioBuilderSubEditors(list, readScenarioAssertionsFromBuilder());
+    };
+  });
+
+  document.querySelectorAll("[data-remove-assertion]").forEach((button) => {
+    button.onclick = () => {
+      const list = readScenarioAssertionsFromBuilder();
+      list.splice(Number(button.dataset.removeAssertion), 1);
+      renderScenarioBuilderSubEditors(readScenarioExtractsFromBuilder(), list);
+    };
+  });
+}
+
 function fillScenarioStepBuilder(step = {}) {
   $("#scenario-step-id").value = step.id || "";
   $("#scenario-step-name").value = step.name || "";
@@ -1475,25 +1607,10 @@ function fillScenarioStepBuilder(step = {}) {
       ? ""
       : JSON.stringify(bodyValue, null, 2);
 
-  const firstExtract = Array.isArray(step.extracts) ? step.extracts[0] : null;
-  $("#scenario-step-extract-name").value = firstExtract?.name || "";
-  $("#scenario-step-extract-path").value = firstExtract?.path || "";
-
-  const firstAssertion = Array.isArray(step.assertions) ? step.assertions[0] : null;
-  $("#scenario-step-assert-type").value = firstAssertion?.type || "exists";
-  $("#scenario-step-assert-path").value = firstAssertion?.path || "";
-  const expectedValue = firstAssertion && Object.prototype.hasOwnProperty.call(firstAssertion, "expected")
-    ? firstAssertion.expected
-    : "";
-  $("#scenario-step-assert-expected").value = typeof expectedValue === "string"
-    ? expectedValue
-    : expectedValue == null || expectedValue === ""
-      ? ""
-      : JSON.stringify(expectedValue);
-
   $("#scenario-step-on-failure").value = step.onFailure || (step.stopOnFailure === false ? "continue" : "stop");
   populateScenarioJumpTargetOptions(step.id || "");
   $("#scenario-step-next-step-id").value = step.nextStepId || "";
+  renderScenarioBuilderSubEditors(step.extracts || [], step.assertions || []);
   syncScenarioJumpTargetVisibility();
 }
 
@@ -1502,11 +1619,6 @@ function buildScenarioStepFromBuilder() {
   const name = $("#scenario-step-name")?.value.trim();
   const interfaceId = $("#scenario-step-interface")?.value || "";
   const caseId = $("#scenario-step-case")?.value || "";
-  const extractName = $("#scenario-step-extract-name")?.value.trim();
-  const extractPath = $("#scenario-step-extract-path")?.value.trim();
-  const assertionType = $("#scenario-step-assert-type")?.value || "exists";
-  const assertionPath = $("#scenario-step-assert-path")?.value.trim();
-  const assertionExpectedRaw = $("#scenario-step-assert-expected")?.value.trim();
   const requestBodyRaw = $("#scenario-step-body")?.value.trim();
   const requestPathParamsRaw = $("#scenario-step-path-params")?.value.trim();
   const requestHeadersRaw = $("#scenario-step-headers")?.value.trim();
@@ -1541,18 +1653,10 @@ function buildScenarioStepFromBuilder() {
   if (requestBodyRaw) request.body = safeJsonParse(requestBodyRaw, requestBodyRaw);
   if (Object.keys(request).length) step.request = request;
 
-  if (extractName && extractPath) {
-    step.extracts = [{ name: extractName, source: "response.bodyJson", path: extractPath }];
-  }
-
-  if (assertionPath) {
-    step.assertions = [{
-      type: assertionType,
-      source: "response.bodyJson",
-      path: assertionPath,
-      expected: assertionExpectedRaw ? safeJsonParse(assertionExpectedRaw, assertionExpectedRaw) : undefined,
-    }];
-  }
+  const extracts = readScenarioExtractsFromBuilder();
+  const assertions = readScenarioAssertionsFromBuilder();
+  if (extracts.length) step.extracts = extracts;
+  if (assertions.length) step.assertions = assertions;
 
   return step;
 }
@@ -3189,6 +3293,29 @@ window.addEventListener("DOMContentLoaded", async () => {
   $("#scenario-step-on-failure").onchange = () => {
     syncScenarioJumpTargetVisibility();
     populateScenarioJumpTargetOptions($("#scenario-step-id")?.value || "");
+  };
+
+  $("#add-scenario-extract-btn").onclick = () => {
+    const extracts = readScenarioExtractsFromBuilder();
+    extracts.push({
+      name: "",
+      source: "response.bodyJson",
+      path: "$",
+      defaultValue: "",
+    });
+    renderScenarioBuilderSubEditors(extracts, readScenarioAssertionsFromBuilder());
+  };
+
+  $("#add-scenario-assertion-btn").onclick = () => {
+    const assertions = readScenarioAssertionsFromBuilder();
+    assertions.push({
+      type: "exists",
+      source: "response.bodyJson",
+      path: "$",
+      expected: "",
+      message: "",
+    });
+    renderScenarioBuilderSubEditors(readScenarioExtractsFromBuilder(), assertions);
   };
 
   $("#append-scenario-step-btn").onclick = () => {

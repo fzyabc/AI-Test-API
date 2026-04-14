@@ -6,6 +6,8 @@ const state = {
   bugs: [],
   caseFilterMode: "all",
   interfaceGroupFilter: "all",
+  latestImportGroupId: "",
+  latestImportGroupName: "",
   selectedInterfaceId: "",
   selectedCaseId: "",
   selectedScenarioId: "",
@@ -118,6 +120,18 @@ function showTab(tabId) {
   document.querySelectorAll(".tab-panel").forEach((panel) => {
     panel.classList.toggle("active", panel.id === tabId);
   });
+}
+
+function syncImportGroupQuickActionVisibility() {
+  const button = $("#run-import-group-unverified-btn");
+  if (!button) return;
+  if (!state.latestImportGroupId) {
+    button.style.display = "none";
+    button.textContent = "运行该导入分组未校对用例";
+    return;
+  }
+  button.style.display = "inline-flex";
+  button.textContent = `运行导入分组未校对用例（${state.latestImportGroupName || state.latestImportGroupId}）`;
 }
 
 function markSettingsDirty() {
@@ -1942,8 +1956,16 @@ async function loadAll() {
   renderRunAuthOptions();
   const runGroupFilter = $("#run-group-filter");
   if (runGroupFilter) {
-    runGroupFilter.value = runGroupFilter.value || "";
+    const hasLatestImportGroup =
+      state.latestImportGroupId &&
+      Array.from(runGroupFilter.options || []).some(
+        (option) => option.value === state.latestImportGroupId,
+      );
+    runGroupFilter.value = hasLatestImportGroup
+      ? state.latestImportGroupId
+      : runGroupFilter.value || "";
   }
+  syncImportGroupQuickActionVisibility();
   const caseFilterMode = $("#case-filter-mode");
   if (caseFilterMode) {
     caseFilterMode.value = state.caseFilterMode;
@@ -2689,7 +2711,31 @@ async function importApiDoc(event) {
       ...verificationHint,
     ].join("\n");
 
+    state.latestImportGroupId = String(result.importGroup?.groupId || "").trim();
+    state.latestImportGroupName = String(
+      result.importGroup?.groupName || state.latestImportGroupId || "",
+    ).trim();
+
     await loadAll();
+
+    if (state.latestImportGroupId) {
+      state.interfaceGroupFilter = state.latestImportGroupId;
+      const interfaceGroupFilter = $("#interface-group-filter");
+      if (interfaceGroupFilter) {
+        interfaceGroupFilter.value = state.latestImportGroupId;
+      }
+      const runGroupFilter = $("#run-group-filter");
+      if (runGroupFilter) {
+        runGroupFilter.value = state.latestImportGroupId;
+      }
+      showTab("interfaces");
+      renderInterfaceList();
+      populateInterfaceForm();
+      renderCaseList();
+      populateCaseForm();
+      syncImportGroupQuickActionVisibility();
+    }
+
     showToast(
       `导入完成: 新增接口 ${result.addedInterfaces}，新增用例 ${result.addedCases}`,
     );
@@ -2801,6 +2847,23 @@ window.addEventListener("DOMContentLoaded", async () => {
   };
   $("#run-auth-profile").onchange = (event) => {
     state.runAuthProfileId = event.target.value;
+  };
+
+  $("#run-import-group-unverified-btn").onclick = async () => {
+    if (!state.latestImportGroupId) {
+      showToast("暂无最近导入分组", "error");
+      return;
+    }
+    const runGroupFilter = $("#run-group-filter");
+    if (runGroupFilter) {
+      runGroupFilter.value = state.latestImportGroupId;
+    }
+    showTab("dashboard");
+    try {
+      await runAllCases({ onlyUnverified: true });
+    } catch (error) {
+      showToast(`执行失败: ${error.message}`, "error");
+    }
   };
 
   $("#interface-group-filter").onchange = (event) => {

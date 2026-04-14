@@ -214,6 +214,40 @@ async function main() {
       throw new Error(`Unexpected retest summary: ${JSON.stringify(retestRun)}`);
     }
 
+    const fillPreviewResponse = await fetch(`http://127.0.0.1:${appPort}/api/runs/${run.id}/fill-business-codes/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const fillPreview = await fillPreviewResponse.json();
+    if (!fillPreviewResponse.ok) {
+      throw new Error(`fill-business-codes preview failed: ${JSON.stringify(fillPreview)}`);
+    }
+    if (fillPreview.summary?.willVerify !== 0 || fillPreview.summary?.willUpdate !== 1) {
+      throw new Error(`Unexpected fill preview summary: ${JSON.stringify(fillPreview.summary)}`);
+    }
+
+    const selectedTargets = (fillPreview.items || [])
+      .filter((item) => item.action === 'update')
+      .map((item) => ({
+        resultId: item.resultId,
+        interfaceId: item.interfaceId,
+        caseId: item.caseId,
+      }));
+
+    const fillResponse = await fetch(`http://127.0.0.1:${appPort}/api/runs/${run.id}/fill-business-codes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selectedTargets }),
+    });
+    const fillResult = await fillResponse.json();
+    if (!fillResponse.ok) {
+      throw new Error(`fill-business-codes failed: ${JSON.stringify(fillResult)}`);
+    }
+    if (fillResult.filledCount !== 1 || fillResult.skippedCount !== 1 || fillResult.unchangedCount !== 0) {
+      throw new Error(`Unexpected fill result: ${JSON.stringify(fillResult)}`);
+    }
+
     const adoptResponse = await fetch(`http://127.0.0.1:${appPort}/api/runs/${run.id}/adopt-failure-results`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -225,19 +259,6 @@ async function main() {
     }
     if (adoptResult.updatedCount !== 1) {
       throw new Error(`Unexpected adopt result: ${JSON.stringify(adoptResult)}`);
-    }
-
-    const fillResponse = await fetch(`http://127.0.0.1:${appPort}/api/runs/${run.id}/fill-business-codes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    const fillResult = await fillResponse.json();
-    if (!fillResponse.ok) {
-      throw new Error(`fill-business-codes failed: ${JSON.stringify(fillResult)}`);
-    }
-    if (fillResult.filledCount !== 0 || fillResult.skippedCount !== 2) {
-      throw new Error(`Unexpected fill result: ${JSON.stringify(fillResult)}`);
     }
 
     const interfacesResponse = await fetch(`http://127.0.0.1:${appPort}/api/interfaces`);

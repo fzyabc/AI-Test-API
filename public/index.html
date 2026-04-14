@@ -8,6 +8,38 @@
 </head>
 <body>
   <div id="toast" class="toast hidden"></div>
+  <div id="fill-preview-modal" class="modal hidden">
+    <div class="modal-backdrop" data-close-fill-preview="true"></div>
+    <div class="modal-dialog card fill-preview-dialog">
+      <div class="row-between">
+        <div>
+          <h3>回填预览</h3>
+          <div id="fill-preview-summary" class="tiny-muted">暂无预览数据</div>
+        </div>
+        <button id="close-fill-preview-btn" type="button" class="secondary subtle-btn">关闭</button>
+      </div>
+      <div class="row fill-preview-toolbar">
+        <button id="fill-preview-select-all-btn" type="button" class="secondary subtle-btn">全选可应用</button>
+        <button id="fill-preview-select-none-btn" type="button" class="secondary subtle-btn">全部取消</button>
+        <button id="fill-preview-apply-btn" type="button" class="primary">确认回填</button>
+      </div>
+      <div class="fill-preview-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>选择</th>
+              <th>接口/用例</th>
+              <th>当前</th>
+              <th>预期写入</th>
+              <th>动作</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody id="fill-preview-items"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
   <div class="shell">
     <aside class="sidebar">
       <h1>Affiliate QA</h1>

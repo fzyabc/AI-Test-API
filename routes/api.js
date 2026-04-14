@@ -60,6 +60,7 @@ const {
   validateBugUpdateInput,
   validateAiRunChatInput,
   validateRunCaseInput,
+  validateFillBusinessCodesInput,
   validateInterfaceGroupUpdateInput,
   validateInterfaceGroupDeleteInput,
   validateBatchInterfaceGroupInput,
@@ -187,6 +188,173 @@ function buildSimpleRunSummary(results = []) {
     passed,
     failed: total - passed,
   };
+}
+
+function buildFillBusinessCodePlan(run, interfacesPayload, options = {}) {
+  const selectedTargets = Array.isArray(options.selectedTargets)
+    ? options.selectedTargets
+    : [];
+  const selectedResultIds = new Set(
+    selectedTargets.map((item) => String(item?.resultId || "").trim()).filter(Boolean),
+  );
+  const selectedCaseKeys = new Set(
+    selectedTargets
+      .map((item) => {
+        const interfaceId = String(item?.interfaceId || "").trim();
+        const caseId = String(item?.caseId || "").trim();
+        return interfaceId && caseId ? `${interfaceId}:${caseId}` : "";
+      })
+      .filter(Boolean),
+  );
+  const restrictSelection = selectedResultIds.size > 0 || selectedCaseKeys.size > 0;
+
+  let filledCount = 0;
+  let skippedCount = 0;
+  let unchangedCount = 0;
+  const verifiedCases = [];
+  const items = [];
+
+  for (const result of run.results || []) {
+    const interfaceId = String(result?.interfaceId || "").trim();
+    const caseId = String(result?.caseId || "").trim();
+    const resultId = String(result?.id || "").trim();
+    const selected = !restrictSelection
+      || selectedResultIds.has(resultId)
+      || selectedCaseKeys.has(`${interfaceId}:${caseId}`);
+
+    const responseBody = result.response?.bodyJson;
+    const transportError = result.response?.transportError;
+    const apiInterface = interfacesPayload.interfaces.find((item) => item.id === interfaceId);
+    const testCase = apiInterface
+      ? (apiInterface.cases || []).find((item) => item.id === caseId)
+      : null;
+
+    const item = {
+      resultId,
+      interfaceId,
+      caseId,
+      interfaceName: result.interfaceName || apiInterface?.name || interfaceId,
+      caseName: result.caseName || testCase?.name || caseId,
+      selected,
+      applicable: false,
+      action: "skip",
+      reason: "",
+      currentBusinessCode: testCase?.expected?.businessCode ?? null,
+      nextBusinessCode: null,
+      currentVerified: testCase?.expectedMeta?.businessCodeVerified === true,
+      nextVerified: testCase?.expectedMeta?.businessCodeVerified === true,
+      currentSource: String(testCase?.expectedMeta?.businessCodeSource || "manual"),
+      nextSource: String(testCase?.expectedMeta?.businessCodeSource || "manual"),
+      changed: false,
+      pass: result?.pass !== false,
+    };
+
+    if (!selected) {
+      item.reason = "未选中";
+      skippedCount += 1;
+      items.push(item);
+      continue;
+    }
+
+    if (!interfaceId || !caseId || !apiInterface || !testCase) {
+      item.reason = "接口或用例不存在";
+      skippedCount += 1;
+      items.push(item);
+      continue;
+    }
+
+    if (transportError || !responseBody || typeof responseBody !== "object") {
+      item.reason = transportError ? "请求失败" : "响应体不是 JSON 对象";
+      skippedCount += 1;
+      items.push(item);
+      continue;
+    }
+
+    const actualCode = extractBusinessCode(responseBody);
+    if (actualCode === null) {
+      item.reason = "未提取到业务码";
+      skippedCount += 1;
+      items.push(item);
+      continue;
+    }
+
+    item.applicable = true;
+    item.nextBusinessCode = actualCode;
+
+    if (!businessCodeEquals(actualCode, testCase.expected?.businessCode)) {
+      item.action = "update";
+      item.reason = "业务码将被更新";
+      item.changed = true;
+      item.nextVerified = true;
+      item.nextSource = "actual_run";
+      filledCount += 1;
+      verifiedCases.push({ interfaceId, caseId });
+      items.push(item);
+      continue;
+    }
+
+    if (testCase.expected?.businessCode != null) {
+      const nextSource =
+        String(testCase.expectedMeta?.businessCodeSource || "manual") === "ai_guess"
+          ? "actual_run"
+          : String(testCase.expectedMeta?.businessCodeSource || "manual");
+      const needsVerifyFlag = testCase.expectedMeta?.businessCodeVerified !== true;
+      const needsSourceFix = nextSource !== String(testCase.expectedMeta?.businessCodeSource || "manual");
+      item.nextVerified = true;
+      item.nextSource = nextSource;
+      if (needsVerifyFlag || needsSourceFix) {
+        item.action = "verify";
+        item.reason = "业务码一致，但将标记为已校对";
+        item.changed = true;
+        filledCount += 1;
+        verifiedCases.push({ interfaceId, caseId });
+      } else {
+        item.action = "unchanged";
+        item.reason = "业务码已一致且已校对";
+        unchangedCount += 1;
+      }
+    } else {
+      item.reason = "当前用例未设置业务码且无法校对";
+      skippedCount += 1;
+      items.push(item);
+      continue;
+    }
+
+    items.push(item);
+  }
+
+  return {
+    filledCount,
+    skippedCount,
+    unchangedCount,
+    verifiedCases,
+    items,
+  };
+}
+
+function applyFillBusinessCodePlan(interfacesPayload, plan) {
+  const updates = new Map(
+    (plan.items || [])
+      .filter((item) => item.selected && item.changed && ["update", "verify"].includes(item.action))
+      .map((item) => [`${item.interfaceId}:${item.caseId}`, item]),
+  );
+
+  for (const apiInterface of interfacesPayload.interfaces || []) {
+    for (const testCase of apiInterface.cases || []) {
+      const planItem = updates.get(`${apiInterface.id}:${testCase.id}`);
+      if (!planItem) continue;
+      if (!testCase.expected || typeof testCase.expected !== "object") {
+        testCase.expected = {};
+      }
+      if (!testCase.expectedMeta || typeof testCase.expectedMeta !== "object") {
+        testCase.expectedMeta = {};
+      }
+      testCase.expected.businessCode = planItem.nextBusinessCode;
+      testCase.expectedMeta.businessCodeSource = planItem.nextSource;
+      testCase.expectedMeta.businessCodeVerified = planItem.nextVerified === true;
+      testCase.expectedMeta.businessCodeUpdatedAt = new Date().toISOString();
+    }
+  }
 }
 
 function isUnverifiedCase(testCase = {}) {
@@ -1163,86 +1331,52 @@ function registerApiRoutes(app) {
   );
 
   app.post(
-    "/api/runs/:id/fill-business-codes",
+    "/api/runs/:id/fill-business-codes/preview",
     asyncHandler(async (req, res) => {
+      const input = validateFillBusinessCodesInput(req.body);
       const runsPayload = await getRuns();
       const run = getRunOrThrow(runsPayload, req.params.id);
       const interfacesPayload = await getInterfaces();
+      const plan = buildFillBusinessCodePlan(run, interfacesPayload, input);
 
-      let filledCount = 0;
-      let skippedCount = 0;
-      const verifiedCases = [];
+      res.json({
+        ok: true,
+        runId: run.id,
+        summary: {
+          total: plan.items.length,
+          selected: plan.items.filter((item) => item.selected).length,
+          applicable: plan.items.filter((item) => item.selected && item.applicable).length,
+          willUpdate: plan.items.filter((item) => item.selected && item.action === "update").length,
+          willVerify: plan.items.filter((item) => item.selected && item.action === "verify").length,
+          unchanged: plan.unchangedCount,
+          skipped: plan.skippedCount,
+        },
+        items: plan.items,
+      });
+    }),
+  );
 
-      for (const result of run.results || []) {
-        const transportError = result.response?.transportError;
-        const responseBody = result.response?.bodyJson;
-        if (transportError || !responseBody || typeof responseBody !== "object") {
-          skippedCount += 1;
-          continue;
-        }
+  app.post(
+    "/api/runs/:id/fill-business-codes",
+    asyncHandler(async (req, res) => {
+      const input = validateFillBusinessCodesInput(req.body);
+      const runsPayload = await getRuns();
+      const run = getRunOrThrow(runsPayload, req.params.id);
+      const interfacesPayload = await getInterfaces();
+      const plan = buildFillBusinessCodePlan(run, interfacesPayload, input);
 
-        const actualCode = extractBusinessCode(responseBody);
-        if (actualCode === null) {
-          skippedCount += 1;
-          continue;
-        }
-
-        const interfaceId = result.interfaceId;
-        const caseId = result.caseId;
-        const apiInterface = interfacesPayload.interfaces.find(
-          (item) => item.id === interfaceId,
-        );
-        if (!apiInterface) {
-          skippedCount += 1;
-          continue;
-        }
-
-        const testCase = (apiInterface.cases || []).find(
-          (item) => item.id === caseId,
-        );
-        if (!testCase) {
-          skippedCount += 1;
-          continue;
-        }
-
-        const expectedCode = testCase.expected?.businessCode;
-        if (!businessCodeEquals(actualCode, expectedCode)) {
-          if (!testCase.expected) {
-            testCase.expected = {};
-          }
-          if (!testCase.expectedMeta || typeof testCase.expectedMeta !== "object") {
-            testCase.expectedMeta = {};
-          }
-          testCase.expected.businessCode = actualCode;
-          testCase.expectedMeta.businessCodeSource = "actual_run";
-          testCase.expectedMeta.businessCodeVerified = true;
-          testCase.expectedMeta.businessCodeUpdatedAt = new Date().toISOString();
-          verifiedCases.push({ interfaceId, caseId });
-          filledCount += 1;
-        } else {
-          if (!testCase.expectedMeta || typeof testCase.expectedMeta !== "object") {
-            testCase.expectedMeta = {};
-          }
-          if (testCase.expected.businessCode != null) {
-            testCase.expectedMeta.businessCodeVerified = true;
-            testCase.expectedMeta.businessCodeUpdatedAt = new Date().toISOString();
-            testCase.expectedMeta.businessCodeSource =
-              String(testCase.expectedMeta.businessCodeSource || "manual") === "ai_guess"
-                ? "actual_run"
-                : String(testCase.expectedMeta.businessCodeSource || "manual");
-            verifiedCases.push({ interfaceId, caseId });
-          }
-          skippedCount += 1;
-        }
-      }
-
+      applyFillBusinessCodePlan(interfacesPayload, plan);
       await saveInterfaces(interfacesPayload);
 
       res.json({
         ok: true,
-        filledCount,
-        skippedCount,
-        verifiedCases,
+        filledCount: plan.filledCount,
+        skippedCount: plan.skippedCount,
+        unchangedCount: plan.unchangedCount,
+        verifiedCases: plan.verifiedCases,
+        appliedItems: plan.items.filter(
+          (item) => item.selected && item.changed && ["update", "verify"].includes(item.action),
+        ),
       });
     }),
   );

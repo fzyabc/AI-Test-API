@@ -27,6 +27,11 @@ const state = {
   retestUpdates: {}, // { "interfaceId:caseId": { pass, assertionSummary, label } }
   lastVerifiedCaseKeys: new Set(),
   lastAdoptedCaseKeys: new Set(),
+  fillPreview: {
+    runId: "",
+    items: [],
+    selectedKeys: new Set(),
+  },
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -94,6 +99,12 @@ function safeJsonParse(text, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function buildFillPreviewItemKey(item = {}) {
+  const resultId = String(item.resultId || "").trim();
+  if (resultId) return resultId;
+  return `${String(item.interfaceId || "").trim()}:${String(item.caseId || "").trim()}`;
 }
 
 async function apiFetch(url, options = {}) {
@@ -2949,27 +2960,117 @@ function setAdoptedHighlights(items = []) {
   }, 10000);
 }
 
+function closeFillPreviewModal() {
+  const modal = $("#fill-preview-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+function renderFillPreviewModal() {
+  const tbody = $("#fill-preview-items");
+  const summaryNode = $("#fill-preview-summary");
+  if (!tbody || !summaryNode) return;
+  const items = state.fillPreview.items || [];
+  const selectedKeys = state.fillPreview.selectedKeys || new Set();
+  const selectedItems = items.filter((item) => selectedKeys.has(buildFillPreviewItemKey(item)));
+  const willUpdate = selectedItems.filter((item) => item.action === "update").length;
+  const willVerify = selectedItems.filter((item) => item.action === "verify").length;
+  summaryNode.textContent = `已选 ${selectedItems.length} 项，可更新 ${willUpdate} 项，可校对 ${willVerify} 项`;
+
+  tbody.innerHTML = items.length
+    ? items.map((item) => {
+        const key = buildFillPreviewItemKey(item);
+        const checkable = item.selected && item.changed && ["update", "verify"].includes(item.action);
+        return `
+          <tr>
+            <td>
+              <input type="checkbox" data-fill-preview-check="${escapeHtml(key)}" ${checkable ? "" : "disabled"} ${selectedKeys.has(key) ? "checked" : ""} />
+            </td>
+            <td>
+              <div><strong>${escapeHtml(item.interfaceName || item.interfaceId || "-")}</strong></div>
+              <div class="tiny-muted">${escapeHtml(item.caseName || item.caseId || "-")}</div>
+            </td>
+            <td><div class="fill-preview-current">码: ${escapeHtml(item.currentBusinessCode == null ? "-" : String(item.currentBusinessCode))}\n来源: ${escapeHtml(item.currentSource || "-")}\n已校对: ${item.currentVerified ? "是" : "否"}</div></td>
+            <td><div class="fill-preview-next">码: ${escapeHtml(item.nextBusinessCode == null ? "-" : String(item.nextBusinessCode))}\n来源: ${escapeHtml(item.nextSource || "-")}\n已校对: ${item.nextVerified ? "是" : "否"}</div></td>
+            <td><span class="fill-preview-action ${escapeHtml(item.action || "skip")}">${escapeHtml(item.action || "skip")}</span></td>
+            <td>${escapeHtml(item.reason || "-")}</td>
+          </tr>
+        `;
+      }).join("")
+    : '<tr><td colspan="6" class="muted">暂无可预览数据</td></tr>';
+
+  tbody.querySelectorAll("[data-fill-preview-check]").forEach((node) => {
+    node.onchange = () => {
+      const key = node.dataset.fillPreviewCheck;
+      if (!key) return;
+      if (node.checked) {
+        state.fillPreview.selectedKeys.add(key);
+      } else {
+        state.fillPreview.selectedKeys.delete(key);
+      }
+      renderFillPreviewModal();
+    };
+  });
+}
+
+async function openFillPreviewModal(runId) {
+  const modal = $("#fill-preview-modal");
+  if (!modal) return;
+  const preview = await apiFetch(`/api/runs/${runId}/fill-business-codes/preview`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  state.fillPreview.runId = runId;
+  state.fillPreview.items = preview.items || [];
+  state.fillPreview.selectedKeys = new Set(
+    (preview.items || [])
+      .filter((item) => item.selected && item.changed && ["update", "verify"].includes(item.action))
+      .map((item) => buildFillPreviewItemKey(item)),
+  );
+  renderFillPreviewModal();
+  modal.classList.remove("hidden");
+}
+
+async function applyFillPreviewSelection() {
+  const runId = state.fillPreview.runId;
+  if (!runId) {
+    showToast("缺少预览运行记录", "error");
+    return;
+  }
+  const selectedTargets = (state.fillPreview.items || [])
+    .filter((item) => state.fillPreview.selectedKeys.has(buildFillPreviewItemKey(item)))
+    .map((item) => ({
+      resultId: item.resultId || "",
+      interfaceId: item.interfaceId,
+      caseId: item.caseId,
+    }));
+
+  if (!selectedTargets.length) {
+    showToast("请先勾选要回填的项", "error");
+    return;
+  }
+
+  const result = await apiFetch(`/api/runs/${runId}/fill-business-codes`, {
+    method: "POST",
+    body: JSON.stringify({ selectedTargets }),
+  });
+  closeFillPreviewModal();
+  showToast(`回填完成：更新 ${result.filledCount} 个，跳过 ${result.skippedCount} 个`);
+  await loadInterfacesOnly();
+  setVerifiedHighlights(result.verifiedCases || []);
+  renderInterfaceList();
+  renderCaseList();
+  populateCaseForm();
+}
+
 async function fillBusinessCodes(runId = state.selectedRunId) {
   try {
     if (!runId) {
       showToast("请先选择历史记录", "error");
       return;
     }
-    const result = await apiFetch(
-      `/api/runs/${runId}/fill-business-codes`,
-      { method: "POST" },
-    );
-    showToast(
-      `回填完成：更新 ${result.filledCount} 个，跳过 ${result.skippedCount} 个`,
-    );
-    // 回填后刷新接口/用例数据，让表单显示最新业务码
-    await loadInterfacesOnly();
-    setVerifiedHighlights(result.verifiedCases || []);
-    renderInterfaceList();
-    renderCaseList();
-    populateCaseForm();
+    await openFillPreviewModal(runId);
   } catch (error) {
-    showToast(`回填失败: ${error.message}`, "error");
+    showToast(`回填预览失败: ${error.message}`, "error");
   }
 }
 
@@ -3181,6 +3282,29 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
     fillBusinessCodes(latest.id);
   };
+  $("#close-fill-preview-btn").onclick = () => closeFillPreviewModal();
+  $("#fill-preview-select-all-btn").onclick = () => {
+    state.fillPreview.selectedKeys = new Set(
+      (state.fillPreview.items || [])
+        .filter((item) => item.selected && item.changed && ["update", "verify"].includes(item.action))
+        .map((item) => buildFillPreviewItemKey(item)),
+    );
+    renderFillPreviewModal();
+  };
+  $("#fill-preview-select-none-btn").onclick = () => {
+    state.fillPreview.selectedKeys = new Set();
+    renderFillPreviewModal();
+  };
+  $("#fill-preview-apply-btn").onclick = async () => {
+    try {
+      await applyFillPreviewSelection();
+    } catch (error) {
+      showToast(`回填失败: ${error.message}`, "error");
+    }
+  };
+  document.querySelectorAll("[data-close-fill-preview='true']").forEach((node) => {
+    node.onclick = () => closeFillPreviewModal();
+  });
   $("#run-auth-profile").onchange = (event) => {
     state.runAuthProfileId = event.target.value;
   };

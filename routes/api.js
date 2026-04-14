@@ -60,6 +60,9 @@ const {
   validateBugUpdateInput,
   validateAiRunChatInput,
   validateRunCaseInput,
+  validateInterfaceGroupUpdateInput,
+  validateInterfaceGroupDeleteInput,
+  validateBatchInterfaceGroupInput,
   validateScenarioInput,
 } = require("../lib/validators");
 
@@ -738,6 +741,117 @@ function registerApiRoutes(app) {
       });
       await saveInterfaces(payload);
       res.json(payload);
+    }),
+  );
+
+  app.put(
+    "/api/interface-groups/:groupId",
+    asyncHandler(async (req, res) => {
+      const input = validateInterfaceGroupUpdateInput(req.body);
+      const groupId = String(req.params.groupId || "").trim();
+      const settings = await getSettings();
+      const groups = Array.isArray(settings.interfaceGroups)
+        ? settings.interfaceGroups
+        : [];
+      const index = groups.findIndex((item) => item.id === groupId);
+      if (index === -1) {
+        throw notFoundError("分组不存在", { groupId });
+      }
+
+      groups[index] = {
+        ...groups[index],
+        name: input.name,
+      };
+      settings.interfaceGroups = groups;
+      await saveSettings(settings);
+      res.json({
+        ok: true,
+        group: groups[index],
+        settings: normalizeSettingsResponse(settings),
+      });
+    }),
+  );
+
+  app.delete(
+    "/api/interface-groups/:groupId",
+    asyncHandler(async (req, res) => {
+      const input = validateInterfaceGroupDeleteInput(req.body);
+      const groupId = String(req.params.groupId || "").trim();
+      const targetGroupId = String(input.targetGroupId || "").trim();
+      const settings = await getSettings();
+      const groups = Array.isArray(settings.interfaceGroups)
+        ? settings.interfaceGroups
+        : [];
+      const existed = groups.find((item) => item.id === groupId);
+      if (!existed) {
+        throw notFoundError("分组不存在", { groupId });
+      }
+      if (targetGroupId && !groups.some((item) => item.id === targetGroupId)) {
+        throw validationError("目标分组不存在", { targetGroupId });
+      }
+      if (targetGroupId && targetGroupId === groupId) {
+        throw validationError("目标分组不能与待删除分组相同", { targetGroupId });
+      }
+
+      const interfacesPayload = await getInterfaces();
+      let movedCount = 0;
+      interfacesPayload.interfaces = (interfacesPayload.interfaces || []).map((item) => {
+        if (String(item.groupId || "") !== groupId) return item;
+        movedCount += 1;
+        return {
+          ...item,
+          groupId: targetGroupId,
+        };
+      });
+
+      settings.interfaceGroups = groups.filter((item) => item.id !== groupId);
+      await Promise.all([
+        saveInterfaces(interfacesPayload),
+        saveSettings(settings),
+      ]);
+
+      res.json({
+        ok: true,
+        deletedGroupId: groupId,
+        movedCount,
+        targetGroupId,
+        settings: normalizeSettingsResponse(settings),
+      });
+    }),
+  );
+
+  app.post(
+    "/api/interfaces/batch-group",
+    asyncHandler(async (req, res) => {
+      const input = validateBatchInterfaceGroupInput(req.body);
+      const groupId = String(input.groupId || "").trim();
+      if (groupId) {
+        const settings = await getSettings();
+        const groups = Array.isArray(settings.interfaceGroups)
+          ? settings.interfaceGroups
+          : [];
+        if (!groups.some((item) => item.id === groupId)) {
+          throw validationError("分组不存在", { groupId });
+        }
+      }
+
+      const interfaceIdSet = new Set(input.interfaceIds);
+      const payload = await getInterfaces();
+      let updatedCount = 0;
+      payload.interfaces = (payload.interfaces || []).map((item) => {
+        if (!interfaceIdSet.has(item.id)) return item;
+        updatedCount += 1;
+        return {
+          ...item,
+          groupId,
+        };
+      });
+      await saveInterfaces(payload);
+      res.json({
+        ok: true,
+        updatedCount,
+        groupId,
+      });
     }),
   );
 

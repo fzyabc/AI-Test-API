@@ -6,6 +6,8 @@ const state = {
   bugs: [],
   caseFilterMode: "all",
   interfaceGroupFilter: "all",
+  batchTargetGroupId: "",
+  selectedInterfaceIds: new Set(),
   latestImportGroupId: "",
   latestImportGroupName: "",
   selectedInterfaceId: "",
@@ -120,6 +122,19 @@ function showTab(tabId) {
   document.querySelectorAll(".tab-panel").forEach((panel) => {
     panel.classList.toggle("active", panel.id === tabId);
   });
+}
+
+function syncLatestImportGroupFromSettings() {
+  if (!state.latestImportGroupId) return;
+  const existed = getInterfaceGroups().find(
+    (item) => item.id === state.latestImportGroupId,
+  );
+  if (!existed) {
+    state.latestImportGroupId = "";
+    state.latestImportGroupName = "";
+    return;
+  }
+  state.latestImportGroupName = String(existed.name || state.latestImportGroupId);
 }
 
 function syncImportGroupQuickActionVisibility() {
@@ -1126,8 +1141,73 @@ function renderInterfaceGroupList() {
   if (!container) return;
   const groups = getInterfaceGroups();
   container.innerHTML = groups.length
-    ? groups.map((item) => `<div class="list-item"><strong>${escapeHtml(item.name)}</strong><div class="tiny-muted">id: ${escapeHtml(item.id)}</div></div>`).join("")
+    ? groups
+      .map(
+        (item) => `
+          <div class="list-item">
+            <strong>${escapeHtml(item.name)}</strong>
+            <div class="tiny-muted">id: ${escapeHtml(item.id)}</div>
+            <div class="row">
+              <button type="button" class="secondary subtle-btn" data-group-rename="${escapeHtml(item.id)}">重命名</button>
+              <button type="button" class="danger subtle-btn" data-group-delete="${escapeHtml(item.id)}">删除</button>
+            </div>
+          </div>
+        `,
+      )
+      .join("")
     : '<div class="list-item muted">暂无分组</div>';
+
+  container.querySelectorAll("[data-group-rename]").forEach((button) => {
+    button.onclick = async (event) => {
+      event.stopPropagation();
+      const groupId = String(button.dataset.groupRename || "").trim();
+      const oldName = getInterfaceGroupName(groupId);
+      const nextName = window.prompt("请输入新分组名", oldName);
+      if (!nextName || !nextName.trim()) return;
+      try {
+        await apiFetch(`/api/interface-groups/${groupId}`, {
+          method: "PUT",
+          body: JSON.stringify({ name: nextName.trim() }),
+        });
+        await loadAll();
+        showToast("分组已重命名");
+      } catch (error) {
+        showToast(`重命名失败: ${error.message}`, "error");
+      }
+    };
+  });
+
+  container.querySelectorAll("[data-group-delete]").forEach((button) => {
+    button.onclick = async (event) => {
+      event.stopPropagation();
+      const groupId = String(button.dataset.groupDelete || "").trim();
+      const groupName = getInterfaceGroupName(groupId);
+      const targetGroupId = window.prompt(
+        `删除分组【${groupName}】。如需迁移请输入目标分组ID；留空则迁移到未分组。`,
+        "",
+      );
+      if (targetGroupId === null) return;
+      try {
+        await apiFetch(`/api/interface-groups/${groupId}`, {
+          method: "DELETE",
+          body: JSON.stringify({
+            targetGroupId: String(targetGroupId || "").trim(),
+          }),
+        });
+        if (state.interfaceGroupFilter === groupId) {
+          state.interfaceGroupFilter = "all";
+        }
+        if (state.latestImportGroupId === groupId) {
+          state.latestImportGroupId = "";
+          state.latestImportGroupName = "";
+        }
+        await loadAll();
+        showToast("分组已删除");
+      } catch (error) {
+        showToast(`删除失败: ${error.message}`, "error");
+      }
+    };
+  });
 }
 
 function renderInterfaceList() {
@@ -1136,9 +1216,15 @@ function renderInterfaceList() {
   container.innerHTML = "";
 
   const visibleInterfaces = getVisibleInterfaces();
+  const visibleIdSet = new Set(visibleInterfaces.map((item) => item.id));
+  state.selectedInterfaceIds = new Set(
+    [...state.selectedInterfaceIds].filter((id) => visibleIdSet.has(id)),
+  );
+
   if (!visibleInterfaces.length) {
     state.selectedInterfaceId = "";
     container.innerHTML = '<div class="list-item muted">暂无接口</div>';
+    renderBatchGroupControls();
     return;
   }
 
@@ -1148,15 +1234,23 @@ function renderInterfaceList() {
   }
 
   for (const item of visibleInterfaces) {
+    const selected = state.selectedInterfaceIds.has(item.id);
     const row = document.createElement("div");
     row.className = `list-item ${item.id === state.selectedInterfaceId ? "active" : ""}`;
     row.innerHTML = `
+      <label class="tiny-muted" style="display:flex;align-items:center;gap:6px;">
+        <input type="checkbox" data-interface-select="${escapeHtml(item.id)}" ${selected ? "checked" : ""} />
+        <span>批量</span>
+      </label>
       <strong>${escapeHtml(item.name || "")}</strong>
       <div class="muted">${escapeHtml(item.method || "GET")} ${escapeHtml(item.path || "")}</div>
       <div class="tiny-muted">分组: ${escapeHtml(getInterfaceGroupName(item.groupId))}</div>
       <div class="tiny-muted">${(item.cases || []).length} 条用例</div>
     `;
-    row.onclick = () => {
+    row.onclick = (event) => {
+      if (event.target && event.target.matches('input[type="checkbox"]')) {
+        return;
+      }
       state.selectedInterfaceId = item.id;
       state.selectedCaseId = "";
       renderInterfaceList();
@@ -1166,6 +1260,41 @@ function renderInterfaceList() {
     };
     container.appendChild(row);
   }
+
+  container.querySelectorAll("[data-interface-select]").forEach((checkbox) => {
+    checkbox.onchange = (event) => {
+      const interfaceId = String(checkbox.dataset.interfaceSelect || "").trim();
+      if (!interfaceId) return;
+      if (event.target.checked) {
+        state.selectedInterfaceIds.add(interfaceId);
+      } else {
+        state.selectedInterfaceIds.delete(interfaceId);
+      }
+      renderBatchGroupControls();
+    };
+  });
+
+  renderBatchGroupControls();
+}
+
+function renderBatchGroupControls() {
+  const select = $("#batch-target-group");
+  const moveButton = $("#batch-move-group-btn");
+  const clearButton = $("#batch-clear-selection-btn");
+  if (!select || !moveButton || !clearButton) return;
+
+  const groups = getInterfaceGroups();
+  select.innerHTML = ['<option value="">迁移到未分组</option>']
+    .concat(groups.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`))
+    .join("");
+  select.value = state.batchTargetGroupId || "";
+
+  const selectedCount = state.selectedInterfaceIds.size;
+  moveButton.disabled = selectedCount === 0;
+  moveButton.textContent = selectedCount
+    ? `批量迁移 (${selectedCount})`
+    : "批量迁移";
+  clearButton.disabled = selectedCount === 0;
 }
 
 function populateInterfaceForm() {
@@ -1947,10 +2076,12 @@ async function loadAll() {
     loadBugsOnly(),
   ]);
 
+  syncLatestImportGroupFromSettings();
   renderLatestRun();
   renderInterfaceGroups();
   renderInterfaceGroupList();
   renderInterfaceList();
+  renderBatchGroupControls();
   populateInterfaceForm();
   renderCaseAuthOptions();
   renderRunAuthOptions();
@@ -2008,6 +2139,7 @@ async function refreshTabData(tabId) {
     renderInterfaceGroups();
     renderInterfaceGroupList();
     renderInterfaceList();
+    renderBatchGroupControls();
     populateInterfaceForm();
     renderCaseAuthOptions();
     renderRunAuthOptions();
@@ -2730,6 +2862,7 @@ async function importApiDoc(event) {
       }
       showTab("interfaces");
       renderInterfaceList();
+      renderBatchGroupControls();
       populateInterfaceForm();
       renderCaseList();
       populateCaseForm();
@@ -2869,9 +3002,47 @@ window.addEventListener("DOMContentLoaded", async () => {
   $("#interface-group-filter").onchange = (event) => {
     state.interfaceGroupFilter = event.target.value || "all";
     renderInterfaceList();
+    renderBatchGroupControls();
     populateInterfaceForm();
     renderCaseList();
     populateCaseForm();
+  };
+
+  $("#batch-target-group").onchange = (event) => {
+    state.batchTargetGroupId = event.target.value || "";
+  };
+
+  $("#batch-clear-selection-btn").onclick = () => {
+    state.selectedInterfaceIds = new Set();
+    renderInterfaceList();
+    renderBatchGroupControls();
+  };
+
+  $("#batch-move-group-btn").onclick = async () => {
+    const interfaceIds = [...state.selectedInterfaceIds];
+    if (!interfaceIds.length) {
+      showToast("请先勾选要迁移的接口", "error");
+      return;
+    }
+    try {
+      const result = await apiFetch("/api/interfaces/batch-group", {
+        method: "POST",
+        body: JSON.stringify({
+          interfaceIds,
+          groupId: state.batchTargetGroupId || "",
+        }),
+      });
+      state.selectedInterfaceIds = new Set();
+      await loadInterfacesOnly();
+      renderInterfaceList();
+      renderBatchGroupControls();
+      populateInterfaceForm();
+      renderCaseList();
+      populateCaseForm();
+      showToast(`批量迁移完成: ${result.updatedCount} 个接口`);
+    } catch (error) {
+      showToast(`批量迁移失败: ${error.message}`, "error");
+    }
   };
 
   $("#new-interface-group-btn").onclick = async () => {

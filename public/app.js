@@ -5,6 +5,7 @@ const state = {
   runs: [],
   bugs: [],
   caseFilterMode: "all",
+  interfaceGroupFilter: "all",
   selectedInterfaceId: "",
   selectedCaseId: "",
   selectedScenarioId: "",
@@ -1069,22 +1070,76 @@ function getSelectedCase() {
   return visibleCases.find((item) => item.id === state.selectedCaseId) || null;
 }
 
+function getInterfaceGroups() {
+  return state.settings?.interfaceGroups || [];
+}
+
+function getInterfaceGroupName(groupId) {
+  if (!groupId) return "未分组";
+  return getInterfaceGroups().find((item) => item.id === groupId)?.name || groupId;
+}
+
+function getVisibleInterfaces() {
+  return state.interfaceGroupFilter === "all"
+    ? state.interfaces
+    : state.interfaces.filter((item) => String(item.groupId || "") === state.interfaceGroupFilter);
+}
+
+function renderInterfaceGroups() {
+  const selectIds = ["#interface-group-filter", "#interface-group", "#import-doc-group", "#run-group-filter"];
+  const groups = getInterfaceGroups();
+  for (const selector of selectIds) {
+    const node = $(selector);
+    if (!node) continue;
+    let baseOption = '<option value="">未分组</option>';
+    if (selector === "#interface-group-filter") {
+      baseOption = '<option value="all">全部分组</option>';
+    }
+    if (selector === "#run-group-filter") {
+      baseOption = '<option value="">全部分组</option>';
+    }
+    node.innerHTML = [baseOption]
+      .concat(groups.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`))
+      .join("");
+  }
+  if ($("#interface-group-filter")) {
+    $("#interface-group-filter").value = state.interfaceGroupFilter;
+  }
+}
+
+function renderInterfaceGroupList() {
+  const container = $("#interface-group-list");
+  if (!container) return;
+  const groups = getInterfaceGroups();
+  container.innerHTML = groups.length
+    ? groups.map((item) => `<div class="list-item"><strong>${escapeHtml(item.name)}</strong><div class="tiny-muted">id: ${escapeHtml(item.id)}</div></div>`).join("")
+    : '<div class="list-item muted">暂无分组</div>';
+}
+
 function renderInterfaceList() {
   const container = $("#interface-list");
   if (!container) return;
   container.innerHTML = "";
 
-  if (!state.interfaces.length) {
+  const visibleInterfaces = getVisibleInterfaces();
+  if (!visibleInterfaces.length) {
+    state.selectedInterfaceId = "";
     container.innerHTML = '<div class="list-item muted">暂无接口</div>';
     return;
   }
 
-  for (const item of state.interfaces) {
+  if (!visibleInterfaces.some((item) => item.id === state.selectedInterfaceId)) {
+    state.selectedInterfaceId = visibleInterfaces[0]?.id || "";
+    state.selectedCaseId = "";
+  }
+
+  for (const item of visibleInterfaces) {
     const row = document.createElement("div");
     row.className = `list-item ${item.id === state.selectedInterfaceId ? "active" : ""}`;
     row.innerHTML = `
       <strong>${escapeHtml(item.name || "")}</strong>
       <div class="muted">${escapeHtml(item.method || "GET")} ${escapeHtml(item.path || "")}</div>
+      <div class="tiny-muted">分组: ${escapeHtml(getInterfaceGroupName(item.groupId))}</div>
       <div class="tiny-muted">${(item.cases || []).length} 条用例</div>
     `;
     row.onclick = () => {
@@ -1105,6 +1160,7 @@ function populateInterfaceForm() {
   $("#interface-name").value = item?.name || "";
   $("#interface-method").value = item?.method || "GET";
   $("#interface-path").value = item?.path || "";
+  $("#interface-group").value = item?.groupId || "";
   $("#interface-description").value = item?.description || "";
   $("#interface-headers").value = JSON.stringify(item?.headers || {}, null, 2);
   $("#interface-body").value = item?.bodyTemplate || "";
@@ -1807,7 +1863,7 @@ function renderRunList() {
       </div>
       <div class="muted">${formatBeijingTime(run.startedAt)}</div>
       <div class="tiny-muted">${escapeHtml(getExecutionProfileLabel(run))}</div>
-      <div class="tiny-muted">${escapeHtml(run.scenario?.name ? `场景 / ${run.scenario.name}` : run.caseSelection === "failed_only" ? "失败项重跑" : run.executionMode || "")}</div>
+      <div class="tiny-muted">${escapeHtml(run.scenario?.name ? `场景 / ${run.scenario.name}` : run.groupName ? `分组 / ${run.groupName}` : run.caseSelection === "failed_only" ? "失败项重跑" : run.executionMode || "")}</div>
       <div>通过 ${run.summary.passed} / 失败 ${run.summary.failed}</div>
     `;
     row.onclick = async () => {
@@ -1878,10 +1934,16 @@ async function loadAll() {
   ]);
 
   renderLatestRun();
+  renderInterfaceGroups();
+  renderInterfaceGroupList();
   renderInterfaceList();
   populateInterfaceForm();
   renderCaseAuthOptions();
   renderRunAuthOptions();
+  const runGroupFilter = $("#run-group-filter");
+  if (runGroupFilter) {
+    runGroupFilter.value = runGroupFilter.value || "";
+  }
   const caseFilterMode = $("#case-filter-mode");
   if (caseFilterMode) {
     caseFilterMode.value = state.caseFilterMode;
@@ -1921,6 +1983,8 @@ async function refreshTabData(tabId) {
 
   if (tabId === "interfaces") {
     await Promise.all([loadInterfacesOnly(), loadSettingsOnly()]);
+    renderInterfaceGroups();
+    renderInterfaceGroupList();
     renderInterfaceList();
     populateInterfaceForm();
     renderCaseAuthOptions();
@@ -1979,6 +2043,7 @@ async function saveInterface(event) {
     name: $("#interface-name").value.trim(),
     method: $("#interface-method").value,
     path: $("#interface-path").value.trim(),
+    groupId: $("#interface-group").value || "",
     description: $("#interface-description").value,
     headers: safeJsonParse($("#interface-headers").value, {}),
     bodyTemplate: $("#interface-body").value,
@@ -2086,6 +2151,59 @@ async function deleteSelectedCase() {
   state.selectedCaseId = "";
   await loadAll();
   showToast("用例已删除");
+}
+
+async function runCurrentCase() {
+  const apiInterface = getSelectedInterface();
+  const testCase = getSelectedCase();
+  if (!apiInterface || !testCase) {
+    showToast("请先选择用例", "error");
+    return;
+  }
+
+  const result = await apiFetch(`/api/interfaces/${apiInterface.id}/cases/${testCase.id}/run`, {
+    method: "POST",
+    body: JSON.stringify(buildRunRequestPayload()),
+  });
+
+  const pseudoRun = {
+    id: result.id,
+    startedAt: result.startedAt,
+    finishedAt: result.finishedAt,
+    summary: {
+      total: 1,
+      passed: result.pass ? 1 : 0,
+      failed: result.pass ? 0 : 1,
+    },
+    executionMode: "case_runner",
+    caseSelection: "single_case",
+    groupId: apiInterface.groupId || "",
+    groupName: getInterfaceGroupName(apiInterface.groupId),
+    executionProfile: {
+      mode: result.authProfileId ? "override" : "case",
+      authProfileId: result.authProfileId || "",
+      authProfileName: getAuthProfileName(result.authProfileId || ""),
+      label: result.authProfileId ? `统一使用 ${getAuthProfileName(result.authProfileId)}` : "按用例账号执行",
+    },
+    results: [result],
+    ai: {
+      enabled: false,
+      analyzed: false,
+      provider: "",
+      meta: null,
+    },
+  };
+
+  state.runs.unshift(pseudoRun);
+  state.selectedRunId = pseudoRun.id;
+  renderLatestRun();
+  renderRunList();
+  showTab("runs");
+  await loadRunDetail(pseudoRun.id).catch(() => {
+    $("#selected-run-meta").textContent = `当前用例执行 | 开始 ${formatBeijingTime(pseudoRun.startedAt)} | 通过 ${pseudoRun.summary.passed} / 失败 ${pseudoRun.summary.failed}`;
+    renderRunTable("#selected-run-results", pseudoRun.results || []);
+  });
+  showToast(`当前用例执行完成: ${result.pass ? "通过" : "失败"}`);
 }
 
 function buildAiPayloadFromForm() {
@@ -2264,6 +2382,10 @@ function buildRunRequestPayload() {
   if (state.runAuthProfileId !== "__case__") {
     payload.authProfileId = state.runAuthProfileId;
   }
+  const groupId = $("#run-group-filter")?.value || "";
+  if (groupId) {
+    payload.groupId = groupId;
+  }
   const aiInstruction = ($("#run-ai-instruction")?.value || "").trim();
   if (aiInstruction) {
     payload.aiInstruction = aiInstruction;
@@ -2312,8 +2434,13 @@ async function runAllCases(options = {}) {
         : "已完成执行，可点击 AI 分析。";
     }
 
+    const scopeLabel = requestPayload.groupId
+      ? `${onlyUnverified ? "未校对用例" : "分组"}执行[${getInterfaceGroupName(requestPayload.groupId)}]`
+      : onlyUnverified
+        ? "未校对用例"
+        : "执行";
     showToast(
-      `${onlyUnverified ? "未校对用例" : "执行"}完成: 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`,
+      `${scopeLabel}完成: 通过 ${run.summary.passed} / 失败 ${run.summary.failed}`,
     );
 
     if (onlyUnverified) {
@@ -2518,7 +2645,11 @@ async function importApiDoc(event) {
     await persistSettingsIfDirty();
     const result = await apiFetch("/api/interfaces/import-doc", {
       method: "POST",
-      body: JSON.stringify({ filename, content }),
+      body: JSON.stringify({
+        filename,
+        content,
+        groupId: $("#import-doc-group")?.value || "",
+      }),
     });
 
     const analysisBlock = result.analysis
@@ -2660,6 +2791,32 @@ window.addEventListener("DOMContentLoaded", async () => {
     state.runAuthProfileId = event.target.value;
   };
 
+  $("#interface-group-filter").onchange = (event) => {
+    state.interfaceGroupFilter = event.target.value || "all";
+    renderInterfaceList();
+    populateInterfaceForm();
+    renderCaseList();
+    populateCaseForm();
+  };
+
+  $("#new-interface-group-btn").onclick = async () => {
+    const name = window.prompt("请输入分组名称");
+    if (!name || !name.trim()) return;
+    const id = name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
+      .replace(/^-+|-+$/g, "") || `group-${Date.now()}`;
+    state.settings.interfaceGroups = [
+      ...(state.settings.interfaceGroups || []),
+      { id, name: name.trim() },
+    ];
+    await saveSettings();
+    renderInterfaceGroups();
+    renderInterfaceGroupList();
+    showToast("分组已创建");
+  };
+
   $("#case-filter-mode").onchange = (event) => {
     state.caseFilterMode = event.target.value || "all";
     renderCaseList();
@@ -2734,6 +2891,14 @@ window.addEventListener("DOMContentLoaded", async () => {
       await deleteSelectedCase();
     } catch (error) {
       showToast(`删除用例失败: ${error.message}`, "error");
+    }
+  };
+
+  $("#run-current-case-btn").onclick = async () => {
+    try {
+      await runCurrentCase();
+    } catch (error) {
+      showToast(`运行当前用例失败: ${error.message}`, "error");
     }
   };
 

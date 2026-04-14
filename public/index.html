@@ -36,6 +36,10 @@
               <select id="run-auth-profile"></select>
             </label>
             <label class="control-label">
+              执行分组
+              <select id="run-group-filter"></select>
+            </label>
+            <label class="control-label">
               AI Notes
               <textarea id="run-ai-instruction" placeholder="给 AI 的额外指令（如：重点关注返佣领取、默认邀请码切换等）"></textarea>
             </label>
@@ -110,6 +114,9 @@
               <label>文档名称
                 <input id="api-doc-name" type="text" placeholder="Affiliate-Referral-Code-API.md" />
               </label>
+              <label>导入到分组
+                <select id="import-doc-group"></select>
+              </label>
               <button id="import-doc-btn" type="submit" class="secondary">AI 识别接口并补全用例</button>
             </div>
             <div>
@@ -128,6 +135,19 @@
           </div>
 
           <div>
+            <div class="card">
+              <div class="row-between">
+                <h3>接口分组</h3>
+                <button id="new-interface-group-btn" type="button" class="secondary">新建分组</button>
+              </div>
+              <div class="row">
+                <select id="interface-group-filter">
+                  <option value="all">全部分组</option>
+                </select>
+              </div>
+              <div id="interface-group-list" class="list compact"></div>
+            </div>
+
             <form id="interface-form" class="card">
               <h3>接口配置</h3>
               <input id="interface-id" type="hidden" />
@@ -142,6 +162,9 @@
                 </select>
               </label>
               <label>路径<input id="interface-path" type="text" placeholder="/api/xxx" /></label>
+              <label>所属分组
+                <select id="interface-group"></select>
+              </label>
               <label>描述<textarea id="interface-description"></textarea></label>
               <label>Headers(JSON)<textarea id="interface-headers">{}</textarea></label>
               <label>Body 模板<textarea id="interface-body"></textarea></label>
@@ -181,6 +204,7 @@
               <label>期望 message(兼容旧数据)<input id="expected-message" type="text" /></label>
               <div class="row">
                 <button type="submit" class="primary">保存用例</button>
+                <button id="run-current-case-btn" type="button" class="secondary">运行当前用例</button>
                 <button id="delete-case-btn" type="button" class="danger">删除用例</button>
               </div>
             </form>

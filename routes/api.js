@@ -71,6 +71,9 @@ function normalizeSettingsResponse(settings) {
   return {
     ...settings,
     executionMode: normalizeExecutionMode(settings.executionMode),
+    interfaceGroups: Array.isArray(settings.interfaceGroups)
+      ? settings.interfaceGroups
+      : [],
     ai: {
       ...(settings.ai || {}),
       globalInstruction: String(settings.ai?.globalInstruction || ""),
@@ -185,6 +188,17 @@ function buildSimpleRunSummary(results = []) {
 
 function isUnverifiedCase(testCase = {}) {
   return testCase?.expectedMeta?.businessCodeVerified !== true;
+}
+
+function filterInterfacesByGroup(interfacesPayload, groupId) {
+  const normalizedGroupId = String(groupId || "").trim();
+  if (!normalizedGroupId) return interfacesPayload;
+  return {
+    ...interfacesPayload,
+    interfaces: (interfacesPayload.interfaces || []).filter(
+      (apiInterface) => String(apiInterface.groupId || "") === normalizedGroupId,
+    ),
+  };
 }
 
 function filterInterfacesForUnverifiedCases(interfacesPayload) {
@@ -744,11 +758,13 @@ function registerApiRoutes(app) {
       const runInstruction = String(input.aiInstruction || "").trim();
       const runContext = String(input.aiContext || "").trim();
       const onlyUnverified = input.onlyUnverified === true;
+      const groupId = String(input.groupId || "").trim();
       const settings = await getSettings();
       const allInterfacesPayload = await getInterfaces();
+      const groupFilteredPayload = filterInterfacesByGroup(allInterfacesPayload, groupId);
       const interfacesPayload = onlyUnverified
-        ? filterInterfacesForUnverifiedCases(allInterfacesPayload)
-        : allInterfacesPayload;
+        ? filterInterfacesForUnverifiedCases(groupFilteredPayload)
+        : groupFilteredPayload;
       const docContexts = await getDocContexts();
       const executionMode = normalizeExecutionMode(settings.executionMode);
       const overrideProfile =
@@ -762,6 +778,10 @@ function registerApiRoutes(app) {
         throw validationError("Selected auth profile not found", {
           authProfileId: requestedAuthProfileId,
         });
+      }
+
+      if (groupId && (!interfacesPayload.interfaces || !interfacesPayload.interfaces.length)) {
+        throw validationError("当前分组下暂无可执行接口");
       }
 
       if (onlyUnverified && (!interfacesPayload.interfaces || !interfacesPayload.interfaces.length)) {
@@ -810,6 +830,10 @@ function registerApiRoutes(app) {
         runInstruction,
         runContext,
         caseSelection: onlyUnverified ? "unverified" : "all",
+        groupId,
+        groupName: groupId
+          ? (settings.interfaceGroups || []).find((item) => item.id === groupId)?.name || groupId
+          : "",
         executionProfile: forceNoAuth
           ? {
               mode: "public",
@@ -906,10 +930,17 @@ function registerApiRoutes(app) {
       const input = validateImportDocInput(req.body);
       const settings = await getSettings();
       const interfacesPayload = await getInterfaces();
-      const result = await importApiDocument(settings, interfacesPayload, {
-        filename: input.filename,
-        content: input.content,
-      });
+      const result = await importApiDocument(
+        settings,
+        interfacesPayload,
+        {
+          filename: input.filename,
+          content: input.content,
+        },
+        {
+          groupId: String(input.groupId || "").trim(),
+        },
+      );
       await saveInterfaces(result.payload);
 
       const docPayload = await getDocContexts();
@@ -1382,9 +1413,23 @@ function registerApiRoutes(app) {
           : testCase;
 
       const authProfileId = String(input.authProfileId || "").trim();
-      const executionOptions = authProfileId
-        ? { overrideAuthProfileId: authProfileId }
-        : {};
+      const forceNoAuth = authProfileId === "__public__";
+      const overrideProfile =
+        authProfileId && !forceNoAuth
+          ? (settings.authProfiles || []).find((item) => item.id === authProfileId)
+          : null;
+
+      if (authProfileId && !forceNoAuth && !overrideProfile) {
+        throw validationError("Selected auth profile not found", {
+          authProfileId,
+        });
+      }
+
+      const executionOptions = forceNoAuth
+        ? { forceNoAuth: true }
+        : overrideProfile
+          ? { overrideAuthProfileId: overrideProfile.id }
+          : {};
 
       const result = await runCase(
         settings,

@@ -2656,6 +2656,17 @@ async function importApiDoc(event) {
       ? ["业务分析:", JSON.stringify(result.analysis, null, 2), ""]
       : [];
 
+    const importGroupBlock = result.importGroup
+      ? [
+          "",
+          "导入分组:",
+          `- 分组: ${result.importGroup.groupName || result.importGroup.groupId}`,
+          `- 分组ID: ${result.importGroup.groupId || "-"}`,
+          `- 自动创建: ${result.importGroup.autoCreated ? "是" : "否"}`,
+          "",
+        ]
+      : [];
+
     const verificationHint = [
       "",
       "【导入校对提示】",
@@ -2673,6 +2684,7 @@ async function importApiDoc(event) {
       `新增用例数: ${result.addedCases}`,
       "",
       ...analysisBlock,
+      ...importGroupBlock,
       ...(result.notes || []),
       ...verificationHint,
     ].join("\n");

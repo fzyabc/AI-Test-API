@@ -217,6 +217,66 @@ function filterInterfacesForUnverifiedCases(interfacesPayload) {
   return nextPayload;
 }
 
+function buildAutoImportGroupName(filename) {
+  const raw = String(filename || "").trim();
+  const base = raw
+    ? raw.split(/[\\/]/).pop().replace(/\.[^.]+$/, "").trim()
+    : "";
+  if (base) {
+    return `AI导入-${base}`;
+  }
+  return `AI导入-${new Date().toISOString().slice(0, 10)}`;
+}
+
+function buildGroupIdFromName(name) {
+  const normalized = String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || `group-${Date.now().toString(36)}`;
+}
+
+function ensureUniqueGroupId(baseId, existingIds) {
+  let candidate = baseId;
+  let index = 2;
+  while (existingIds.has(candidate)) {
+    candidate = `${baseId}-${index}`;
+    index += 1;
+  }
+  return candidate;
+}
+
+function resolveImportGroup(settings, inputGroupId, filename) {
+  const groups = Array.isArray(settings.interfaceGroups)
+    ? settings.interfaceGroups
+    : [];
+  const normalizedInputGroupId = String(inputGroupId || "").trim();
+
+  if (normalizedInputGroupId) {
+    const existed = groups.find((item) => item.id === normalizedInputGroupId);
+    return {
+      groupId: normalizedInputGroupId,
+      groupName: existed?.name || normalizedInputGroupId,
+      autoCreated: false,
+      settingsChanged: false,
+    };
+  }
+
+  const name = buildAutoImportGroupName(filename);
+  const existingIds = new Set(groups.map((item) => item.id));
+  const id = ensureUniqueGroupId(buildGroupIdFromName(name), existingIds);
+  const nextGroups = [...groups, { id, name }];
+  settings.interfaceGroups = nextGroups;
+
+  return {
+    groupId: id,
+    groupName: name,
+    autoCreated: true,
+    settingsChanged: true,
+  };
+}
+
 function registerApiRoutes(app) {
   app.get(
     "/api/settings",
@@ -930,6 +990,15 @@ function registerApiRoutes(app) {
       const input = validateImportDocInput(req.body);
       const settings = await getSettings();
       const interfacesPayload = await getInterfaces();
+      const resolvedGroup = resolveImportGroup(
+        settings,
+        input.groupId,
+        input.filename,
+      );
+      if (resolvedGroup.settingsChanged) {
+        await saveSettings(settings);
+      }
+
       const result = await importApiDocument(
         settings,
         interfacesPayload,
@@ -938,7 +1007,7 @@ function registerApiRoutes(app) {
           content: input.content,
         },
         {
-          groupId: String(input.groupId || "").trim(),
+          groupId: resolvedGroup.groupId,
         },
       );
       await saveInterfaces(result.payload);
@@ -967,6 +1036,11 @@ function registerApiRoutes(app) {
         notes: result.notes,
         analysis: result.analysis || null,
         interfaces: result.payload.interfaces,
+        importGroup: {
+          groupId: resolvedGroup.groupId,
+          groupName: resolvedGroup.groupName,
+          autoCreated: resolvedGroup.autoCreated,
+        },
         storedDocs: docPayload.docs.length,
       });
     }),

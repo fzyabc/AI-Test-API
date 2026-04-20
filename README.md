@@ -7,22 +7,11 @@ This project now contains two layers:
 
 ## Current scope
 
-- Affiliate API test platform routes (`/api/...`)
-- QBJ MVP demo backend routes (`/api/v1/...`) for sports companion product validation
-
-### QBJ MVP (new)
-
-- Auth: `POST /api/v1/auth/wx-login`
-- Match center: `GET /api/v1/matches`
-- Budget: `GET/PUT /api/v1/me/budget`
-- Records: create/submit/update/delete/list/settle
-- Weekly review: generate/query
-- Poster: weekly poster generation
-
-See docs:
-
-- `docs/qbj-mvp-api.md`
-- `docs/qbj-mvp-mysql.sql`
+- `POST /api/affiliate/referral-code/create`
+- `GET /api/affiliate/referral-code/list`
+- `POST /api/affiliate/referral-code/update`
+- `POST /api/affiliate/referral-code/set-default`
+- `GET /api/affiliate/code-info/:code`
 
 ## Install
 
@@ -78,7 +67,6 @@ Local JSON files:
 - `data/runs.json`
 - `data/scenarios.json`
 - `data/ai-reports/*.md`
-- `data/qbj.json` (QBJ MVP data)
 
 ## Notes
 

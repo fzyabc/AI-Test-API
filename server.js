@@ -2,7 +2,6 @@ const express = require("express");
 const path = require("path");
 const { isHttpError } = require("./lib/http-errors");
 const { registerApiRoutes } = require("./routes/api");
-const { registerQbjRoutes } = require("./routes/qbj-api");
 
 const app = express();
 const port = process.env.PORT || 3006;
@@ -20,7 +19,6 @@ app.use("/api", (_req, res, next) => {
 app.use(express.static(path.join(__dirname, "public")));
 
 registerApiRoutes(app);
-registerQbjRoutes(app);
 
 app.get("*", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
